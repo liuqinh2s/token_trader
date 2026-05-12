@@ -1,0 +1,6 @@
+node_modules/
+data/
+.vscode/
+config.json
+scanner.log
+tokens.db

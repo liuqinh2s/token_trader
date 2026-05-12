@@ -1,0 +1,111 @@
+name: BSC Token Scan
+
+on:
+  workflow_dispatch:         # Manual trigger
+  push:
+    branches:
+      - main                 # Auto trigger on push to main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  scan-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore queue state from data branch
+        run: |
+          git stash
+          if git ls-remote --exit-code origin data >/dev/null 2>&1; then
+            echo "Fetching queue state from data branch..."
+            git checkout -B data origin/data
+            if [ -f data/queue.json ]; then
+              mkdir -p /tmp/queue_backup
+              cp data/queue.json /tmp/queue_backup/
+              echo "Restored queue.json from previous run"
+            fi
+            git checkout main
+            if [ -f /tmp/queue_backup/queue.json ]; then
+              mkdir -p data
+              cp /tmp/queue_backup/queue.json data/
+              echo "Using restored queue state"
+            fi
+          fi
+          git stash pop || true
+
+      - name: Run scan (GitHub Actions mode)
+        run: python3 src/scan.py
+        env:
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
+
+      - name: Push data to data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p /tmp/scan-data/data
+          cp -a data/. /tmp/scan-data/data/ 2>/dev/null || true
+          git stash
+          if git ls-remote --exit-code origin data >/dev/null 2>&1; then
+            echo "Fetching existing data branch..."
+            git checkout -B data origin/data
+            mkdir -p /tmp/existing-data/data
+            cp -a data/. /tmp/existing-data/data/ 2>/dev/null || true
+          else
+            echo "Creating new data branch..."
+            git checkout --orphan data
+            git rm -rf . 2>/dev/null || true
+            mkdir -p data
+          fi
+          cp -a /tmp/scan-data/data/. data/ 2>/dev/null || true
+          if [ -d /tmp/existing-data/data ]; then
+            for f in /tmp/existing-data/data/*.json; do
+              fname=$(basename "$f")
+              if [ ! -f "data/$fname" ]; then
+                cp "$f" "data/$fname"
+              fi
+            done
+          fi
+          git add -f data/
+          git commit -m "🔍 Scan $(date -u +%Y-%m-%d\ %H:%M) UTC" || echo "No changes to commit"
+          git push -f origin data
+          git checkout main
+          git stash pop || true
+
+      - name: Build site
+        run: node src/build.js
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    needs: scan-and-deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

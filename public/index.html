@@ -1,0 +1,3421 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BSC Token Scanner</title>
+  <style>
+    /* ===== 主题变量 ===== */
+    :root,
+    [data-theme="dark"] {
+      --bg-primary: #0a0e1a;
+      --bg-secondary: #0d1117;
+      --bg-card: #141a24;
+      --bg-hover: #1a2233;
+      --bg-glass: rgba(20, 26, 36, 0.85);
+      --border-primary: #1e2736;
+      --border-hover: #2d3748;
+      --text-primary: #c9d1d9;
+      --text-secondary: #6e7681;
+      --text-muted: #484f58;
+      --text-bright: #e6edf3;
+      --accent: #f0b90b;
+      --accent-light: #f7d060;
+      --accent-dim: rgba(240, 185, 11, 0.12);
+      --accent-border: rgba(240, 185, 11, 0.25);
+      --link-blue: #58a6ff;
+      --link-green: #4caf50;
+      --danger: #da3633;
+      --danger-text: #f85149;
+      --danger-bg: #da363318;
+      --danger-border: #da363333;
+      --toast-bg: rgba(240, 185, 11, 0.95);
+      --toast-color: #0b0f19;
+      --tag-dev-buy: #238636;
+      --tag-dev-lp: #1f6feb;
+      --tag-smart-buy: #8957e5;
+      --tag-copycat: #da3633;
+      --tag-scam: #ff0040;
+      --tag-twitter: #1d9bf0;
+      --tag-telegram: #229ed9;
+      --tag-website: #238636;
+      --tag-boost: #f0b90b;
+      --progress-track: #1e2736;
+      --spinner-border: #1e2736;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+      --glow-accent: 0 0 20px rgba(240, 185, 11, 0.15);
+    }
+
+    [data-theme="light"] {
+      --bg-primary: #f8f9fc;
+      --bg-secondary: #ffffff;
+      --bg-card: #ffffff;
+      --bg-hover: #f0f2f5;
+      --bg-glass: rgba(255, 255, 255, 0.9);
+      --border-primary: #e1e4e8;
+      --border-hover: #d0d7de;
+      --text-primary: #1f2328;
+      --text-secondary: #656d76;
+      --text-muted: #8b949e;
+      --text-bright: #1f2328;
+      --accent: #d4a00a;
+      --accent-light: #f0b90b;
+      --accent-dim: rgba(212, 160, 10, 0.08);
+      --accent-border: rgba(212, 160, 10, 0.2);
+      --link-blue: #0969da;
+      --link-green: #1a7f37;
+      --danger: #cf222e;
+      --danger-text: #cf222e;
+      --danger-bg: #cf222e0d;
+      --danger-border: #cf222e22;
+      --toast-bg: #1f2328;
+      --toast-color: #ffffff;
+      --tag-dev-buy: #1a7f37;
+      --tag-dev-lp: #0969da;
+      --tag-smart-buy: #8250df;
+      --tag-copycat: #cf222e;
+      --tag-scam: #d1242f;
+      --tag-twitter: #1d9bf0;
+      --tag-telegram: #229ed9;
+      --tag-website: #1a7f37;
+      --tag-boost: #d4a00a;
+      --progress-track: #e1e4e8;
+      --spinner-border: #e1e4e8;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+      --glow-accent: 0 0 20px rgba(212, 160, 10, 0.1);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: auto;
+      overflow: visible;
+      overscroll-behavior-y: auto;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #app {
+      padding: 6px 10px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      height: auto;
+      overflow: visible;
+      background: var(--bg-primary);
+    }
+
+    .fixed-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg-primary);
+      padding-bottom: 2px;
+      flex-shrink: 0;
+    }
+
+    .scroll-area {
+      flex: none;
+      overflow: visible;
+      min-height: 0;
+      padding-bottom: 60px;
+      background: var(--bg-primary);
+    }
+
+    /* ===== 头部 ===== */
+    header {
+      text-align: center;
+      padding: 4px 0 2px;
+      position: relative;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 16px;
+      color: var(--accent);
+      letter-spacing: 1px;
+      font-weight: 800;
+      text-shadow: var(--glow-accent);
+    }
+
+    .subtitle,
+    .filter-toggle,
+    .filter-desc {
+      display: none;
+    }
+
+    /* 主题切换 - 隐藏（移到设置页） */
+    .theme-toggle {
+      display: none;
+    }
+
+    /* ===== 统计栏 ===== */
+    .stats-bar {
+      margin: 4px 0;
+      gap: 4px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .stat {
+      display: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: 10px;
+      text-align: center;
+      transition: all .2s;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .stat:first-child {
+      display: flex;
+      padding: 3px 8px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border-radius: 8px;
+    }
+
+    .stat:first-child .label,
+    .stat:first-child .val {
+      display: inline;
+      font-size: 11px;
+    }
+
+    .stat:first-child .label {
+      color: var(--text-muted);
+    }
+
+    .stat:first-child .val {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .stat .label {
+      display: block;
+      font-size: 9px;
+      color: var(--text-muted);
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .stat .val {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-top: 1px;
+    }
+
+    /* 精筛通过 - 特殊高亮 */
+    .stat-highlight .val {
+      color: var(--accent) !important;
+      font-size: 15px !important;
+    }
+
+    .stat-highlight .label {
+      color: var(--accent) !important;
+      opacity: 0.7;
+    }
+
+    /* 大盘情绪指示器 */
+    .sentiment-val {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .sentiment-arrow {
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .sentiment-arrow.bullish {
+      color: #4caf50;
+    }
+
+    .sentiment-arrow.bearish {
+      color: var(--danger-text);
+    }
+
+    .sentiment-text {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .sentiment-text.bullish {
+      color: #4caf50;
+    }
+
+    .sentiment-text.bearish {
+      color: var(--danger-text);
+    }
+
+    .sentiment-detail {
+      font-size: 9px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-top: 2px;
+    }
+
+    /* 扫描时间行内的"回到最新"按钮 */
+    .stat-latest-btn {
+      display: inline-block;
+      padding: 2px 10px;
+      font-size: 10px;
+      border-radius: 6px;
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-primary);
+      margin-left: 4px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all .2s;
+      font-weight: 500;
+    }
+
+    .stat-latest-btn:hover {
+      background: var(--accent);
+      color: var(--bg-primary);
+      border-color: var(--accent);
+    }
+
+    /* ===== 操作栏 + Tab ===== */
+    .toolbar {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      margin: 4px 0;
+      gap: 6px;
+      flex-direction: column;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+      padding: 6px 16px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all .2s;
+      font-weight: 500;
+    }
+
+    button:hover {
+      background: var(--accent);
+      color: var(--bg-primary);
+      border-color: var(--accent);
+      box-shadow: var(--glow-accent);
+    }
+
+    .tab-bar {
+      display: flex;
+      width: 100%;
+      gap: 0;
+      box-shadow: var(--shadow-sm);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .tab-btn {
+      flex: 1;
+      text-align: center;
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 0;
+      padding: 7px 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all .2s;
+      font-weight: 500;
+      border-right: none;
+    }
+
+    .tab-btn:last-child {
+      border-right: 1px solid var(--border-primary);
+    }
+
+    .tab-btn:first-child {
+      border-radius: 10px 0 0 10px;
+    }
+
+    .tab-btn:last-child {
+      border-radius: 0 10px 10px 0;
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: var(--bg-primary);
+      border-color: var(--accent);
+      font-weight: 700;
+      box-shadow: var(--glow-accent);
+    }
+
+    .tab-btn:hover:not(.active) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .search-results-info {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin: 2px 0;
+    }
+
+    .search-results-info .highlight {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .search-results-info .clear-search {
+      color: var(--link-blue);
+      cursor: pointer;
+      margin-left: 8px;
+      text-decoration: underline;
+    }
+
+    .search-scan-time {
+      font-size: 10px;
+      color: var(--text-muted);
+      display: block;
+    }
+
+    /* ===== 名称列 ===== */
+    .name-cell {
+      max-width: 160px;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+
+    .name-symbol-primary {
+      color: var(--text-bright);
+      font-weight: 600;
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color .15s;
+    }
+
+    .name-symbol-primary:hover {
+      color: var(--accent);
+    }
+
+    .name-symbol-primary:active {
+      opacity: 0.7;
+    }
+
+    .name-secondary {
+      color: var(--text-muted);
+      font-size: 10px;
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* 合约地址列 */
+    .addr-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+
+    .addr-text {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 11px;
+      color: var(--link-blue);
+      white-space: nowrap;
+      letter-spacing: -0.3px;
+    }
+
+    .addr-links {
+      display: inline-flex;
+      gap: 3px;
+      align-items: center;
+      opacity: 0.6;
+      transition: opacity .2s;
+    }
+
+    .addr-links a,
+    .copy-btn {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: all .15s;
+      border: 1px solid transparent;
+    }
+
+    .copy-btn {
+      background: none;
+      border-color: var(--border-primary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      min-width: auto;
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+
+    .copy-btn:hover {
+      background: var(--accent);
+      color: var(--bg-primary);
+      border-color: var(--accent);
+    }
+
+    .link-bsc {
+      color: var(--link-blue);
+    }
+
+    .link-bsc:hover {
+      background: color-mix(in srgb, var(--link-blue) 13%, transparent);
+      border-color: color-mix(in srgb, var(--link-blue) 27%, transparent);
+    }
+
+    .link-4m {
+      color: var(--accent);
+    }
+
+    .link-4m:hover {
+      background: color-mix(in srgb, var(--accent) 13%, transparent);
+      border-color: color-mix(in srgb, var(--accent) 27%, transparent);
+    }
+
+    .link-flap {
+      color: #a78bfa;
+    }
+
+    .link-flap:hover {
+      background: color-mix(in srgb, #a78bfa 13%, transparent);
+      border-color: color-mix(in srgb, #a78bfa 27%, transparent);
+    }
+
+    .source-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      margin-right: 4px;
+      font-weight: 600;
+      vertical-align: middle;
+      line-height: 1.4;
+    }
+
+    .source-badge img {
+      width: 14px;
+      height: 14px;
+      border-radius: 2px;
+      vertical-align: middle;
+      object-fit: contain;
+    }
+
+    .source-badge.badge-4m {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+
+    .source-badge.badge-flap {
+      color: #a78bfa;
+      background: color-mix(in srgb, #a78bfa 12%, transparent);
+      border: 1px solid color-mix(in srgb, #a78bfa 25%, transparent);
+    }
+
+    .link-bn {
+      color: var(--link-green);
+    }
+
+    .link-bn:hover {
+      background: color-mix(in srgb, var(--link-green) 13%, transparent);
+      border-color: color-mix(in srgb, var(--link-green) 27%, transparent);
+    }
+
+    /* 持币数 */
+    .holders-val {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .holders-peak {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    /* 价格 */
+    .price-info {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .price-label {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .price-ratio {
+      font-size: 10px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* 标签 */
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      font-size: 9px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin: 1px 2px;
+      font-weight: 600;
+      white-space: nowrap;
+      letter-spacing: 0.2px;
+      line-height: 1.4;
+      vertical-align: middle;
+    }
+
+    .tag a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .tag a:hover {
+      text-decoration: underline;
+    }
+
+    .tag-dev-buy {
+      background: var(--tag-dev-buy);
+      color: #fff;
+    }
+
+    .tag-dev-lp {
+      background: var(--tag-dev-lp);
+      color: #fff;
+    }
+
+    .tag-smart-buy {
+      background: var(--tag-smart-buy);
+      color: #fff;
+    }
+
+    .tag-copycat {
+      background: var(--tag-copycat);
+      color: #fff;
+    }
+
+    .tag-scam {
+      background: var(--tag-scam);
+      color: #fff;
+      font-weight: 700;
+      animation: scam-pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes scam-pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.7;
+      }
+    }
+
+    .tag-twitter {
+      background: var(--tag-twitter);
+      color: #fff;
+    }
+
+    .tag-telegram {
+      background: var(--tag-telegram);
+      color: #fff;
+    }
+
+    .tag-website {
+      background: var(--tag-website);
+      color: #fff;
+    }
+
+    .tag-boost {
+      background: var(--tag-boost);
+      color: #000;
+    }
+
+    .tags-cell {
+      max-width: 220px;
+    }
+
+    .tags-cell .tag {
+      vertical-align: middle;
+    }
+
+    /* 淘汰原因 */
+    .elim-reason {
+      display: inline-block;
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--danger-border);
+      font-weight: 500;
+    }
+
+    /* 进度条 */
+    .progress-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .progress-track {
+      width: 48px;
+      height: 6px;
+      background: var(--progress-track);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-light));
+      border-radius: 3px;
+      transition: width .3s ease;
+    }
+
+    .progress-text {
+      font-size: 10px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    /* 币龄 */
+    .age-text {
+      color: var(--text-secondary);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    /* 空状态 */
+    .no-data {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .no-data-icon {
+      font-size: 40px;
+      margin-bottom: 12px;
+      display: block;
+      opacity: 0.5;
+    }
+
+    .no-data-text {
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: var(--text-secondary);
+    }
+
+    .no-data-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* ===== Toast ===== */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--toast-bg);
+      color: var(--toast-color);
+      padding: 8px 22px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 999;
+      transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: var(--shadow-lg);
+      backdrop-filter: blur(8px);
+    }
+
+    /* ===== 手机端首页顶部统计 hero ===== */
+    .mobile-hero-stat {
+      display: flex;
+      gap: 8px;
+      padding: 0;
+      margin: 4px 0;
+    }
+
+    .mobile-hero-item {
+      flex: 1;
+      text-align: center;
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .mobile-hero-item .hero-number {
+      font-size: 28px;
+      font-weight: 800;
+      display: block;
+      line-height: 1.2;
+    }
+
+    .mobile-hero-item .hero-number-elim {
+      color: var(--danger-text);
+      text-shadow: 0 0 20px rgba(248, 81, 73, 0.3);
+    }
+
+    .mobile-hero-item .hero-number-filtered {
+      color: var(--accent);
+      text-shadow: var(--glow-accent);
+    }
+
+    .mobile-hero-item .hero-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* ===== 手机端大盘情绪 ===== */
+    .mobile-sentiment-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin: 4px 0;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border-primary);
+      background: var(--bg-card);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .mobile-sentiment-bar.bullish {
+      border-color: rgba(76, 175, 80, 0.25);
+      background: rgba(76, 175, 80, 0.06);
+      color: #4caf50;
+    }
+
+    .mobile-sentiment-bar.bearish {
+      border-color: var(--danger-border);
+      background: var(--danger-bg);
+      color: var(--danger-text);
+    }
+
+    .mobile-sentiment-bar .sentiment-detail {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    /* ===== 卡片样式 ===== */
+    .card-list {
+      display: block;
+    }
+
+    .token-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow-sm);
+      transition: all .2s;
+    }
+
+    .token-card:active {
+      transform: scale(0.99);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+
+    .card-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-bright);
+      cursor: pointer;
+      transition: color .15s;
+    }
+
+    .card-name:active {
+      color: var(--accent);
+    }
+
+    .card-symbol {
+      color: var(--text-secondary);
+      font-size: 11px;
+      margin-left: 6px;
+    }
+
+    .card-holders {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1;
+      text-shadow: var(--glow-accent);
+    }
+
+    .card-addr-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin: 8px 0;
+      background: var(--bg-secondary);
+      border-radius: 10px;
+      padding: 7px 10px;
+      border: 1px solid var(--border-primary);
+    }
+
+    .card-addr-text {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      color: var(--link-blue);
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .card-addr-row .copy-btn,
+    .card-addr-row a {
+      flex-shrink: 0;
+      font-size: 10px;
+      padding: 3px 7px;
+      border-radius: 6px;
+      line-height: 1.2;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-primary);
+    }
+
+    .card-social {
+      margin-top: 8px;
+    }
+
+    .card-social .tag {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      margin: 2px 3px 2px 0;
+    }
+
+    /* 加分标签 */
+    .tag-bonus {
+      background: linear-gradient(135deg, #6c3ce0, #8b5cf6);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .tag-bonus-good {
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .tag-bonus-warn {
+      background: linear-gradient(135deg, #d97706, #f59e0b);
+      color: #fff;
+    }
+
+    .tag-bonus-bad {
+      background: var(--tag-copycat);
+      color: #fff;
+    }
+
+    /* 加分总分配章 */
+    .bonus-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #f0b90b, #f7d060);
+      color: #0b0f19;
+      font-size: 11px;
+      font-weight: 800;
+      border-radius: 10px;
+      padding: 1px 8px;
+      margin-left: 6px;
+      line-height: 1.6;
+      box-shadow: 0 0 8px rgba(240, 185, 11, 0.3);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .bonus-badge-top {
+      background: linear-gradient(135deg, #ff6b35, #f7d060);
+      color: #0b0f19;
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 10px;
+      padding: 2px 10px;
+      box-shadow: 0 0 10px rgba(255, 107, 53, 0.4);
+      margin-right: 4px;
+    }
+
+    .card-price-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 14px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+      line-height: 1.7;
+    }
+
+    .token-card .elim-reason {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    /* ===== 虚拟滚动容器 ===== */
+    .virtual-scroll-container {
+      position: relative;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .virtual-scroll-spacer {
+      position: relative;
+      width: 100%;
+    }
+
+    .virtual-scroll-content {
+      position: absolute;
+      left: 0;
+      right: 0;
+      width: 100%;
+    }
+
+    /* ===== 手机端底部导航栏 ===== */
+    .mobile-tabbar {
+      display: flex;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border-primary);
+      z-index: 100;
+      padding: 4px 0;
+      padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .mobile-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 6px 0;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 10px;
+      cursor: pointer;
+      transition: color .2s;
+    }
+
+    .mobile-tab:hover {
+      background: none;
+      color: var(--text-secondary);
+    }
+
+    .mobile-tab.active {
+      color: var(--accent);
+    }
+
+    .mobile-tab-icon {
+      font-size: 20px;
+      line-height: 1;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mobile-tab-icon svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .mobile-tab-label {
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    /* ===== 关于页面 ===== */
+    .about-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 48px;
+      background: var(--bg-primary);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      z-index: 60;
+      padding: 20px 16px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .about-page:not(.hidden) {
+      display: block;
+    }
+
+    .about-page-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-primary);
+    }
+
+    .about-back-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all .2s;
+      flex-shrink: 0;
+    }
+
+    .about-back-btn:hover {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .about-back-btn svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .about-page-header h2 {
+      color: var(--accent);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    /* ===== 历史页面 ===== */
+    .history-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 48px;
+      background: var(--bg-primary);
+      overflow: hidden;
+      -webkit-overflow-scrolling: touch;
+      z-index: 50;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .history-page:not(.hidden) {
+      display: flex;
+    }
+
+    .history-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 10px 10px;
+      border-bottom: 1px solid var(--border-primary);
+      background: var(--bg-primary);
+      flex-shrink: 0;
+    }
+
+    .history-page-list {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 0 10px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .history-page-header h2 {
+      color: var(--accent);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .history-back-btn {
+      font-size: 12px;
+      padding: 5px 14px;
+      border-radius: 8px;
+    }
+
+    .hist-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border-primary);
+      font-size: 11px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all .15s;
+      margin-bottom: 1px;
+    }
+
+    .hist-row:last-child {
+      border-bottom: none;
+    }
+
+    .hist-row:hover {
+      background: var(--bg-hover);
+    }
+
+    .hist-row.active {
+      background: var(--accent-dim);
+      border-left: 3px solid var(--accent);
+    }
+
+    .hist-row .ht {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .hist-row .hist-stats {
+      color: var(--text-secondary);
+      font-size: 10px;
+      align-self: flex-end;
+    }
+
+    .hist-row .hv {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .hist-row .hist-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 4px;
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    .history-page .hist-row {
+      padding: 12px 12px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border-primary);
+      border-radius: 8px;
+      margin-bottom: 2px;
+    }
+
+    .history-page .hist-row .ht {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .history-page .hist-row .hist-stats {
+      font-size: 11px;
+    }
+
+    /* ===== 搜索页面 ===== */
+    .search-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 48px;
+      background: var(--bg-primary);
+      overflow: hidden;
+      z-index: 50;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .search-page:not(.hidden) {
+      display: flex;
+    }
+
+    .search-page-top {
+      padding: 16px 10px 8px;
+      background: var(--bg-primary);
+      flex-shrink: 0;
+    }
+
+    .search-page-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .search-page-input-row input {
+      flex: 1;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: var(--text-primary);
+      font-size: 14px;
+      outline: none;
+      transition: all .2s;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .search-page-input-row input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    .search-page-input-row input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .search-page-input-row button {
+      padding: 10px 20px;
+      font-size: 13px;
+      border-radius: 12px;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    .search-card-wrapper {
+      margin: 8px 10px 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: visible;
+    }
+
+    .search-page-info {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-secondary);
+      padding: 6px 0;
+      line-height: 1.5;
+    }
+
+    .search-page-info .highlight {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .search-page-info .clear-search {
+      color: var(--link-blue);
+      cursor: pointer;
+      margin-left: 8px;
+      text-decoration: underline;
+    }
+
+    .search-results-area {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 8px 10px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .search-empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .search-empty-state .search-empty-icon {
+      font-size: 48px;
+      display: block;
+      margin-bottom: 12px;
+      opacity: 0.4;
+    }
+
+    .search-empty-state .search-empty-text {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .search-empty-state .search-empty-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ===== 设置页面 ===== */
+    .settings-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 48px;
+      background: var(--bg-primary);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      z-index: 50;
+      padding: 24px 16px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .settings-page:not(.hidden) {
+      display: block;
+    }
+
+    .settings-page h2 {
+      color: var(--accent);
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 20px;
+    }
+
+    .settings-group {
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-primary);
+      cursor: pointer;
+      transition: background .15s;
+    }
+
+    .settings-row:last-child {
+      border-bottom: none;
+    }
+
+    .settings-row:active {
+      background: var(--bg-hover);
+    }
+
+    .settings-row-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .settings-row-icon {
+      font-size: 20px;
+      width: 28px;
+      text-align: center;
+    }
+
+    .settings-row-label {
+      font-size: 15px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .settings-row-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+    }
+
+    .settings-row-right .chevron {
+      font-size: 16px;
+      color: var(--text-muted);
+    }
+
+    /* iOS 风格切换开关 */
+    .ios-toggle {
+      position: relative;
+      width: 51px;
+      height: 31px;
+      border-radius: 16px;
+      background: var(--text-muted);
+      cursor: pointer;
+      transition: background .3s;
+      flex-shrink: 0;
+    }
+
+    .ios-toggle.on {
+      background: var(--accent);
+    }
+
+    .ios-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 27px;
+      height: 27px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      transition: transform .3s;
+    }
+
+    .ios-toggle.on::after {
+      transform: translateX(20px);
+    }
+
+    /* 关于页面内容样式 */
+    .about-content h2 {
+      color: var(--accent);
+      font-size: 22px;
+      text-align: center;
+      margin-bottom: 4px;
+      font-weight: 800;
+    }
+
+    .about-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 12px;
+      margin-bottom: 24px;
+      letter-spacing: 0.5px;
+    }
+
+    .about-section {
+      margin-bottom: 24px;
+    }
+
+    .about-section h3 {
+      font-size: 14px;
+      color: var(--text-bright);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-primary);
+      font-weight: 700;
+    }
+
+    .about-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .flow-num {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--bg-primary);
+      font-size: 13px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--glow-accent);
+    }
+
+    .flow-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .flow-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 3px;
+      line-height: 1.6;
+    }
+
+    .about-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .about-list li {
+      font-size: 12px;
+      color: var(--text-primary);
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-primary);
+      line-height: 1.6;
+    }
+
+    .about-list li::before {
+      content: '•';
+      color: var(--accent);
+      font-weight: 700;
+      margin-right: 8px;
+    }
+
+    .about-tags {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      line-height: 2;
+    }
+
+    .about-tag-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-right: 8px;
+    }
+
+    /* ===== 精筛成功率页面 ===== */
+    .quality-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 48px;
+      background: var(--bg-primary);
+      overflow: hidden;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .quality-page:not(.hidden) {
+      display: flex;
+    }
+
+    .quality-page-header {
+      flex-shrink: 0;
+      padding: 16px 14px 0;
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--border-primary);
+    }
+
+    .quality-page-header .quality-panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .quality-page-header .quality-panel-title h2 {
+      color: var(--accent);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .quality-page-header .quality-tab-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 0;
+    }
+
+    .quality-page-header .quality-tab-btn {
+      flex: 1;
+      padding: 10px 4px;
+      font-size: 13px;
+    }
+
+    .quality-page-header .quality-tab-btn .qtab-count {
+      font-size: 24px;
+    }
+
+    .quality-page-list {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 8px 10px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .quality-page .quality-card {
+      padding: 14px 14px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+    }
+
+    .quality-page .quality-card-name {
+      font-size: 14px;
+      max-width: 200px;
+    }
+
+    .quality-page .quality-card-growth {
+      font-size: 14px;
+    }
+
+    .quality-page .quality-card-meta {
+      font-size: 11px;
+      gap: 10px;
+    }
+
+    /* ===== 精筛成功率通用样式 ===== */
+    .quality-panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .quality-rate-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--accent-border);
+    }
+
+    .quality-tab-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 0;
+    }
+
+    .quality-tab-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 10px;
+      padding: 8px 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all .2s;
+    }
+
+    .quality-tab-btn.active {
+      font-weight: 700;
+      box-shadow: var(--shadow-md);
+    }
+
+    .quality-tab-btn.active[data-mqtab="success"] {
+      background: rgba(26, 127, 55, 0.12);
+      border-color: rgba(26, 127, 55, 0.4);
+      color: #4caf50;
+    }
+
+    .quality-tab-btn.active[data-mqtab="fail"] {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+      color: var(--danger-text);
+    }
+
+    .quality-tab-btn.active[data-mqtab="missed"] {
+      background: rgba(230, 126, 34, 0.12);
+      border-color: rgba(230, 126, 34, 0.4);
+      color: #e67e22;
+    }
+
+    .quality-tab-btn.active[data-mqtab="gainers"] {
+      background: rgba(240, 185, 11, 0.12);
+      border-color: rgba(240, 185, 11, 0.4);
+      color: var(--accent);
+    }
+
+    .quality-tab-btn:hover:not(.active) {
+      background: var(--bg-hover);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+    }
+
+    .qtab-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .qtab-count {
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .qtab-label {
+      font-size: 9px;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+
+    .quality-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      transition: all .15s;
+    }
+
+    .quality-card:hover {
+      border-color: var(--border-hover);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .quality-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .quality-card-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
+      cursor: pointer;
+      transition: color .15s;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 160px;
+    }
+
+    .quality-card-name:hover {
+      color: var(--accent);
+    }
+
+    .quality-card-growth {
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .quality-card-growth.positive {
+      color: var(--link-green);
+    }
+
+    .quality-card-growth.negative {
+      color: var(--danger-text);
+    }
+
+    .quality-card-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .quality-card-meta span {
+      white-space: nowrap;
+    }
+
+    .quality-card-elim {
+      display: inline-block;
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--danger-border);
+      font-weight: 500;
+    }
+
+    .quality-card-addr {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 10px;
+      color: var(--link-blue);
+      cursor: pointer;
+      transition: color .15s;
+    }
+
+    .quality-card-addr:hover {
+      color: var(--accent);
+    }
+
+    .quality-empty {
+      text-align: center;
+      padding: 40px 16px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    /* ===== 自动刷新指示器 ===== */
+    .auto-refresh-indicator {
+      display: none !important;
+    }
+
+    .refresh-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--link-green);
+      animation: pulse 2s infinite;
+    }
+
+    .refresh-dot.paused {
+      background: var(--text-muted);
+      animation: none;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.3;
+      }
+    }
+  </style>
+  <script>
+    /* 主题初始化 - 在渲染前执行，避免闪烁 */
+    (function () {
+      const saved = localStorage.getItem('theme');
+      if (saved) document.documentElement.setAttribute('data-theme', saved);
+    })();
+  </script>
+</head>
+
+<body>
+  <div id="app">
+    <div class="fixed-header">
+      <header>
+        <div class="header-title">
+          <h1>BSC Token Scanner</h1>
+        </div>
+      </header>
+
+      <!-- 手机端统计 hero -->
+      <div class="mobile-hero-stat" id="mobileHeroStat">
+        <div class="mobile-hero-item">
+          <span class="hero-number hero-number-elim" id="heroElimCount">--</span>
+          <span class="hero-label">近 48h 淘汰</span>
+        </div>
+        <div class="mobile-hero-item">
+          <span class="hero-number hero-number-filtered" id="heroFilteredCount">--</span>
+          <span class="hero-label">累计精筛</span>
+        </div>
+      </div>
+
+      <!-- 手机端大盘情绪 -->
+      <div class="mobile-sentiment-bar hidden" id="mobileSentimentBar">
+        <span id="mobileSentimentIcon">--</span>
+        <span id="mobileSentimentText">大盘 --</span>
+        <span class="sentiment-detail" id="mobileSentimentDetail"></span>
+      </div>
+
+      <div class="stats-bar" id="statsBar">
+        <div class="stat"><span class="label">扫描时间</span><span class="val" id="scanTime">--</span><button
+            class="stat-latest-btn" id="btnLatestInline" onclick="goLatest()">回到最新</button></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tab-bar" id="tabBar">
+          <button class="tab-btn active" data-tab="filtered" onclick="switchTab('filtered')">精筛结果</button>
+          <button class="tab-btn" data-tab="queue" onclick="switchTab('queue')">队列存活</button>
+          <!-- 已突破 tab 已移除 (v14) -->
+          <button class="tab-btn" data-tab="eliminated" onclick="switchTab('eliminated')">本轮淘汰</button>
+          <button class="tab-btn" data-tab="rejected" onclick="switchTab('rejected')">入场淘汰</button>
+        </div>
+      </div>
+      <div id="searchInfo" class="search-results-info hidden"></div>
+    </div>
+
+    <div class="scroll-area" id="scrollArea">
+      <div id="tokenTable">
+        <div id="noData" class="no-data hidden">
+          <span class="no-data-icon">🔍</span>
+          <div class="no-data-text">暂无符合精筛条件的代币</div>
+          <div class="no-data-hint">可切换到「队列存活」查看当前跟踪中的代币</div>
+        </div>
+        <div id="cardList" class="card-list"></div>
+      </div>
+
+      <div id="queueTable" class="hidden">
+        <div id="noQueue" class="no-data hidden">
+          <span class="no-data-icon">📭</span>
+          <div class="no-data-text">队列为空</div>
+          <div class="no-data-hint">等待下一轮扫描发现新代币</div>
+        </div>
+        <div id="queueCardList" class="card-list"></div>
+      </div>
+
+      <div id="breakthroughTable" class="hidden">
+        <div id="noBreakthrough" class="no-data hidden">
+          <span class="no-data-icon">🚀</span>
+          <div class="no-data-text">暂无价格突破的代币</div>
+          <div class="no-data-hint">峰值价格突破 0.0001 的代币会显示在这里</div>
+        </div>
+        <div id="breakthroughCardList" class="card-list"></div>
+      </div>
+
+      <div id="eliminatedTable" class="hidden">
+        <div id="noEliminated" class="no-data hidden">
+          <span class="no-data-icon">🗑️</span>
+          <div class="no-data-text">本轮无淘汰代币</div>
+          <div class="no-data-hint">本轮扫描中未淘汰任何队列代币</div>
+        </div>
+        <div id="eliminatedCardList" class="card-list"></div>
+      </div>
+
+      <div id="rejectedTable" class="hidden">
+        <div id="noRejected" class="no-data hidden">
+          <span class="no-data-icon">🚫</span>
+          <div class="no-data-text">本轮无入场淘汰代币</div>
+          <div class="no-data-hint">本轮扫描中未拒绝任何新发现代币</div>
+        </div>
+        <div id="rejectedCardList" class="card-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- 手机端底部导航栏 -->
+  <nav class="mobile-tabbar" id="mobileTabbar">
+    <button class="mobile-tab active" data-page="home" onclick="switchPage('home')">
+      <span class="mobile-tab-icon"><svg viewBox="0 0 24 24">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg></span>
+      <span class="mobile-tab-label">首页</span>
+    </button>
+    <button class="mobile-tab" data-page="quality" onclick="switchPage('quality')">
+      <span class="mobile-tab-icon"><svg viewBox="0 0 24 24">
+          <line x1="18" y1="20" x2="18" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="4" />
+          <line x1="6" y1="20" x2="6" y2="14" />
+        </svg></span>
+      <span class="mobile-tab-label">精筛</span>
+    </button>
+    <button class="mobile-tab" data-page="history" onclick="switchPage('history')">
+      <span class="mobile-tab-icon"><svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg></span>
+      <span class="mobile-tab-label">历史</span>
+    </button>
+    <button class="mobile-tab" data-page="search" onclick="switchPage('search')">
+      <span class="mobile-tab-icon"><svg viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg></span>
+      <span class="mobile-tab-label">搜索</span>
+    </button>
+    <button class="mobile-tab" data-page="settings" onclick="switchPage('settings')">
+      <span class="mobile-tab-icon"><svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg></span>
+      <span class="mobile-tab-label">设置</span>
+    </button>
+  </nav>
+
+  <!-- 历史页面 -->
+  <div class="history-page hidden" id="historyPage">
+    <div class="history-page-header">
+      <h2>扫描历史</h2>
+      <button class="history-back-btn" id="historyBackBtn"
+        onclick="goLatest();updateHistoryPageHighlight(null)">回到最新</button>
+    </div>
+    <div class="history-page-list" id="historyListMobile"></div>
+  </div>
+
+  <!-- 搜索页面 -->
+  <div class="search-page hidden" id="searchPage">
+    <div class="search-page-top">
+      <div class="search-page-input-row">
+        <input type="text" id="mobileSearchInput" placeholder="搜索名称、代号或地址..." aria-label="搜索代币"
+          onkeydown="if(event.key==='Enter')doMobileSearch()">
+        <button onclick="doMobileSearch()">搜索</button>
+      </div>
+      <div class="search-card-wrapper" id="searchCardWrapper" style="display:none">
+        <div id="mobileSearchInfo" class="search-page-info"></div>
+        <div class="tab-bar" id="searchTabBar">
+          <button class="tab-btn active" data-stab="s-filtered" onclick="switchSearchTab('s-filtered')">精筛结果</button>
+          <button class="tab-btn" data-stab="s-queue" onclick="switchSearchTab('s-queue')">队列存活</button>
+          <!-- 已突破搜索tab已移除 (v14) -->
+          <button class="tab-btn" data-stab="s-eliminated" onclick="switchSearchTab('s-eliminated')">本轮淘汰</button>
+          <button class="tab-btn" data-stab="s-rejected" onclick="switchSearchTab('s-rejected')">入场淘汰</button>
+        </div>
+      </div>
+    </div>
+    <div class="search-results-area" id="searchResultsArea">
+      <div class="search-empty-state" id="searchEmptyState">
+        <span class="search-empty-icon">🔍</span>
+        <div class="search-empty-text">搜索代币</div>
+        <div class="search-empty-hint">输入名称、代号或合约地址</div>
+      </div>
+      <div id="searchFilteredCards" style="display:none"></div>
+      <div id="searchQueueCards" style="display:none"></div>
+      <div id="searchBreakthroughCards" style="display:none"></div>
+      <div id="searchEliminatedCards" style="display:none"></div>
+      <div id="searchRejectedCards" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- 精筛成功率页面 -->
+  <div class="quality-page hidden" id="qualityPage">
+    <div class="quality-page-header">
+      <div class="quality-panel-title">
+        <h2>📊 精筛成功率</h2>
+        <span class="quality-rate-badge" id="mobileQualityRateBadge">--</span>
+      </div>
+      <div class="quality-tab-bar">
+        <button class="quality-tab-btn active" data-mqtab="success" onclick="switchMobileQualityTab('success')">
+          <span class="qtab-icon">✅</span>
+          <span class="qtab-count" id="mobileQualitySuccessCount">0</span>
+          <span class="qtab-label" id="mobileQualitySuccessLabel">成功</span>
+        </button>
+        <button class="quality-tab-btn" data-mqtab="fail" onclick="switchMobileQualityTab('fail')">
+          <span class="qtab-icon">❌</span>
+          <span class="qtab-count" id="mobileQualityFailCount">0</span>
+          <span class="qtab-label" id="mobileQualityFailLabel">失败</span>
+        </button>
+        <button class="quality-tab-btn" data-mqtab="missed" onclick="switchMobileQualityTab('missed')">
+          <span class="qtab-icon">🔥</span>
+          <span class="qtab-count" id="mobileQualityMissedCount">0</span>
+          <span class="qtab-label" id="mobileQualityMissedLabel">漏掉</span>
+        </button>
+        <button class="quality-tab-btn" data-mqtab="gainers" onclick="switchMobileQualityTab('gainers')">
+          <span class="qtab-icon">🚀</span>
+          <span class="qtab-count" id="mobileQualityGainerCount">0</span>
+          <span class="qtab-label" id="mobileQualityGainerLabel">涨幅榜</span>
+        </button>
+      </div>
+    </div>
+    <div class="quality-page-list" id="mobileQualitySuccessList"></div>
+    <div class="quality-page-list hidden" id="mobileQualityFailList"></div>
+    <div class="quality-page-list hidden" id="mobileQualityMissedList"></div>
+    <div class="quality-page-list hidden" id="mobileQualityGainerList"></div>
+  </div>
+
+  <!-- 设置页面 -->
+  <div class="settings-page hidden" id="settingsPage">
+    <h2>设置</h2>
+    <div class="settings-group">
+      <div class="settings-row" onclick="toggleMobileTheme(event)">
+        <div class="settings-row-left">
+          <span class="settings-row-icon">🎨</span>
+          <span class="settings-row-label">深色模式</span>
+        </div>
+        <div class="settings-row-right">
+          <div class="ios-toggle" id="themeIosToggle" onclick="event.stopPropagation();toggleMobileTheme(event)">
+          </div>
+        </div>
+      </div>
+      <div class="settings-row" onclick="toggleMobileAutoRefresh()">
+        <div class="settings-row-left">
+          <span class="settings-row-icon">🔄</span>
+          <span class="settings-row-label">自动刷新</span>
+        </div>
+        <div class="settings-row-right">
+          <div class="ios-toggle" id="autoRefreshIosToggle" onclick="event.stopPropagation();toggleMobileAutoRefresh()">
+          </div>
+        </div>
+      </div>
+      <div class="settings-row" onclick="openAboutFromSettings()">
+        <div class="settings-row-left">
+          <span class="settings-row-icon">ℹ️</span>
+          <span class="settings-row-label">关于</span>
+        </div>
+        <div class="settings-row-right">
+          <span class="chevron">›</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关于页面（从设置进入） -->
+  <div class="about-page hidden" id="aboutPage">
+    <div class="about-page-header">
+      <button class="about-back-btn" onclick="backToSettings()"><svg viewBox="0 0 24 24">
+          <polyline points="15 18 9 12 15 6" />
+        </svg></button>
+      <h2>关于</h2>
+    </div>
+    <div class="about-content">
+      <h2>BSC Token Scanner</h2>
+      <p class="about-subtitle">链上发现 · 队列淘汰 · 标签制精筛 · 极速 15min</p>
+
+      <div class="about-section">
+        <h3>🔍 扫描流程</h3>
+        <div class="about-flow">
+          <div class="flow-step">
+            <span class="flow-num">1</span>
+            <div>
+              <div class="flow-title">链上发现 (~1s)</div>
+              <div class="flow-desc">BSC RPC eth_getLogs 扫描 four.meme / flap.sh TokenCreated 事件，100% 覆盖链上新代币</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">2</span>
+            <div>
+              <div class="flow-title">入场筛选 (~数秒)</div>
+              <div class="flow-desc">four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰无社交 / 总量≠10亿 / 币龄过大
+              </div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">3</span>
+            <div>
+              <div class="flow-title">队列淘汰 (~数秒)</div>
+              <div class="flow-desc">DexScreener 批量查价(含涨跌幅/Boost) + GeckoTerminal 持币数 + Detail API → 永久淘汰弃盘币</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">4</span>
+            <div>
+              <div class="flow-title">标签制精筛 (瞬时)</div>
+              <div class="flow-desc">统一通道，未毕业币和已毕业币走同一套标签制。基础标签全部满足(持币≥10/进度≥8%或流动性≥$5k/仿盘≥3/未崩盘/社交≥1)
+                +
+                单动能触发(最近3轮内持币增长或价格上涨, 任一即可)</div>
+            </div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">5</span>
+          <div>
+            <div class="flow-title">仿盘检测 (零 API)</div>
+            <div class="flow-desc">本地统计同名代币数量，≥3 个同名标记为仿盘；仿盘&lt;3 在精筛中排除</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="about-section">
+      <h3>❌ 淘汰条件 (v18 移除持币数依赖)</h3>
+      <ul class="about-list">
+        <li>🚨 诈骗开发者黑名单（系统自动收集：一轮内暴跌 80%+ 的代币开发者，累计 ≥2 个诈骗币即拉黑，其所有新币入场即拒）</li>
+        <li>🚨 诈骗代币黑名单（已确认的诈骗代币合约地址，入场即拒，币龄&gt;48h自动清理）</li>
+        <li>蹭名币（symbol/name 命中主流币种黑名单，如 USDT/BTC/ETH 等，100% 假币）</li>
+        <li>价格从峰值跌 95%+（当前价格 &lt; 1e-7 视为 API 异常，跳过）</li>
+        <li>单根K线跌幅 > 55%（过山车币）</li>
+        <li>流动性跌破 $100（仅已毕业代币）</li>
+        <li>进度 &lt; 1% 且币龄 &gt; 1h</li>
+        <li>进度 &lt; 5% 且币龄 &gt; 2h</li>
+        <li>进度 &lt; 10% 且币龄 &gt; 4h</li>
+        <li>进度从峰值跌 50 个百分点+（热度消退，加减法）</li>
+        <li>币龄 &gt; 48h</li>
+        <li>🚀 价格突破: 峰值价格 ≥ 0.0001 → 标记为「已突破」，跳过常规淘汰条件，仅受币龄淘汰</li>
+      </ul>
+    </div>
+
+    <div class="about-section">
+      <h3>✅ 精筛条件（标签制）</h3>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
+        核心思路：基础标签保证底线质量，单动能触发确认增长趋势。统一通道，未毕业币和已毕业币走同一套标签制，不再区分毕业通道。
+      </p>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;line-height:1.5;">
+        <strong>基础标签（全部满足，AND）：</strong>
+      </p>
+      <ul class="about-list">
+        <li>持币数 ≥ 10</li>
+        <li>进度 ≥ 8%（未毕业）/ 流动性 ≥ $5k（已毕业）</li>
+        <li>仿盘数 ≥ 3</li>
+        <li>未崩盘（近三期最高点跌幅 &lt; 35%）</li>
+        <li>社交 ≥ 1</li>
+        <li>单动能：最近3轮内持币数有增长 或 价格有上涨（任一即可；首轮豁免：持币≥20 + 进度≥15%/流动性≥$5k）</li>
+      </ul>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
+        大盘情绪（Gas指数）仍在每轮计算并记录，仅用于数据分析，不作为精筛阻断条件。
+      </p>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
+        回测数据（1046轮，73769代币）：单动能策略买入329次，胜率71.1%，翻倍56个，净赚277 BNB。
+      </p>
+    </div>
+
+    <div class="about-section">
+      <h3>📊 数据源</h3>
+      <ul class="about-list">
+        <li>BSC RPC — 链上 TokenCreated 事件发现（four.meme + flap.sh，均使用 bonding curve）</li>
+        <li>four.meme Detail API — 代币详情 / 社交 / 进度 / 未毕业持币数</li>
+        <li>flap.sh 页面 SSR — flap 代币社交媒体 (twitter/telegram/website)</li>
+        <li>DexScreener — 批量价格 / 流动性 / 交易量 / 买卖笔数（flap 代币主要数据源）</li>
+        <li>GeckoTerminal — 已毕业代币持币数</li>
+      </ul>
+    </div>
+
+    <div class="about-section">
+      <h3>📈 目标价区间</h3>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
+        目标价区间: 0.000001 ~ 0.0001。尽可能低价买入，等突破 0.0001 卖出。
+      </p>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
+        峰值价格突破 0.0001 的代币标记为「已突破」，保留在队列中继续跟踪更新，跳过常规淘汰条件（价格跌幅、持币数下降等），仅受币龄 &gt;48h 淘汰。
+        已突破代币同时出现在队列存活和已突破 tab 中，便于单独查看和统计分析。
+      </p>
+    </div>
+
+    <div class="about-section">
+      <h3>🏷️ 标签说明</h3>
+      <div class="about-tags">
+        <span class="tag tag-copycat">🔥 仿盘</span> <span class="about-tag-desc">≥3 个同名代币标记；仿盘&lt;5 精筛排除</span>
+        <span class="tag tag-boost">🚀 Boost</span> <span class="about-tag-desc">DexScreener 付费推广，项目方投入资金的正向信号</span>
+        <span class="tag tag-twitter">𝕏</span> <span class="about-tag-desc">Twitter</span>
+        <span class="tag tag-telegram">TG</span> <span class="about-tag-desc">Telegram</span>
+        <span class="tag tag-website">Web</span> <span class="about-tag-desc">官网</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'filtered';
+    let currentData = null;
+    let activeHistoryId = null;
+    let autoRefreshEnabled = true;
+    const cache = {};
+
+    /* ===== 通用虚拟滚动渲染器 ===== */
+    const virtualListState = {};
+    const CARD_HEIGHT = 210;
+    const BUFFER_COUNT = 5;
+    const VIRTUAL_THRESHOLD = 20;
+
+    function renderVirtualList(container, items, cardBuilder, listId, scrollContainer) {
+      if (virtualListState[listId] && virtualListState[listId].cleanup) {
+        virtualListState[listId].cleanup();
+      }
+
+      if (items.length <= VIRTUAL_THRESHOLD) {
+        console.log('[VirtualScroll] ' + listId + ': only ' + items.length + ' items, no virtual scroll needed');
+        container.innerHTML = items.map((t, i) => cardBuilder(t, i)).join('');
+        virtualListState[listId] = null;
+        return;
+      }
+
+      const totalHeight = items.length * CARD_HEIGHT;
+      console.log('[VirtualScroll] ' + listId + ': ' + items.length + ' items, total height: ' + totalHeight + 'px');
+      container.innerHTML = `<div style="height:${totalHeight}px;position:relative;width:100%;">
+        <div id="vsc_${listId}" style="position:absolute;left:0;right:0;top:0;width:100%;"></div>
+      </div>`;
+
+      const scroller = scrollContainer || window;
+      let lastStart = -1, lastEnd = -1;
+
+      function renderVisible() {
+        const el = document.getElementById('vsc_' + listId);
+        if (!el || !el.parentElement) {
+          console.log('[VirtualScroll] ' + listId + ': element not found or no parent');
+          return;
+        }
+
+        let scrolled, viewportHeight;
+        if (scrollContainer) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const spacerRect = el.parentElement.getBoundingClientRect();
+          scrolled = Math.max(0, containerRect.top - spacerRect.top);
+          viewportHeight = containerRect.height;
+        } else {
+          const parentRect = el.parentElement.getBoundingClientRect();
+          scrolled = Math.max(0, -parentRect.top);
+          viewportHeight = window.innerHeight;
+        }
+        console.log('[VirtualScroll] ' + listId + ': scrolled=' + scrolled + ', viewportHeight=' + viewportHeight);
+
+        const startIndex = Math.max(0, Math.floor(scrolled / CARD_HEIGHT) - BUFFER_COUNT);
+        const visibleCount = Math.ceil(viewportHeight / CARD_HEIGHT) + BUFFER_COUNT * 2;
+        const endIndex = Math.min(items.length, startIndex + visibleCount);
+        console.log('[VirtualScroll] ' + listId + ': rendering index ' + startIndex + ' to ' + endIndex);
+
+        if (lastStart === startIndex && lastEnd === endIndex) return;
+        lastStart = startIndex;
+        lastEnd = endIndex;
+
+        el.style.top = (startIndex * CARD_HEIGHT) + 'px';
+        el.innerHTML = items.slice(startIndex, endIndex).map((t, i) => cardBuilder(t, startIndex + i)).join('');
+      }
+
+      let rafId = null;
+      function onScroll() {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          renderVisible();
+        });
+      }
+
+      scroller.addEventListener('scroll', onScroll, { passive: true });
+      console.log('[VirtualScroll] ' + listId + ': scroll listener added, scroller=' + (scrollContainer ? 'container' : 'window'));
+      renderVisible();
+
+      virtualListState[listId] = {
+        cleanup: () => {
+          scroller.removeEventListener('scroll', onScroll);
+          if (rafId) cancelAnimationFrame(rafId);
+        }
+      };
+    }
+
+    function cleanupVirtualList(listId) {
+      if (virtualListState[listId] && virtualListState[listId].cleanup) {
+        virtualListState[listId].cleanup();
+        virtualListState[listId] = null;
+      }
+    }
+
+    /* 主题切换 */
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateIosToggle();
+    }
+
+    function updateIosToggle() {
+      const toggle = document.getElementById('themeIosToggle');
+      if (!toggle) return;
+      const theme = document.documentElement.getAttribute('data-theme');
+      toggle.classList.toggle('on', theme === 'dark');
+    }
+
+    function toggleMobileTheme(e) {
+      if (e) e.stopPropagation();
+      toggleTheme();
+    }
+
+    updateIosToggle();
+
+    /* 自动刷新切换 */
+    function toggleMobileAutoRefresh() {
+      autoRefreshEnabled = !autoRefreshEnabled;
+      updateAutoRefreshIosToggle();
+    }
+
+    function updateAutoRefreshIosToggle() {
+      const toggle = document.getElementById('autoRefreshIosToggle');
+      if (toggle) toggle.classList.toggle('on', autoRefreshEnabled);
+    }
+
+    updateAutoRefreshIosToggle();
+
+    /* ===== 底部导航页面切换 ===== */
+    let currentMobilePage = 'home';
+
+    function switchPage(page) {
+      currentMobilePage = page;
+      const app = document.getElementById('app');
+      const aboutPage = document.getElementById('aboutPage');
+      const historyPage = document.getElementById('historyPage');
+      const searchPage = document.getElementById('searchPage');
+      const qualityPage = document.getElementById('qualityPage');
+      const settingsPage = document.getElementById('settingsPage');
+
+      document.querySelectorAll('.mobile-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
+
+      app.style.display = 'none';
+      aboutPage.classList.add('hidden');
+      if (historyPage) historyPage.classList.add('hidden');
+      if (searchPage) searchPage.classList.add('hidden');
+      if (qualityPage) qualityPage.classList.add('hidden');
+      if (settingsPage) settingsPage.classList.add('hidden');
+
+      if (page === 'home') {
+        app.style.display = '';
+      } else if (page === 'history') {
+        if (historyPage) {
+          historyPage.classList.remove('hidden');
+          renderMobileHistoryList();
+        }
+      } else if (page === 'search') {
+        if (searchPage) {
+          searchPage.classList.remove('hidden');
+          setTimeout(() => {
+            const input = document.getElementById('mobileSearchInput');
+            if (input) input.focus();
+          }, 100);
+        }
+      } else if (page === 'quality') {
+        if (qualityPage) {
+          qualityPage.classList.remove('hidden');
+          renderMobileQualityPanel();
+        }
+      } else if (page === 'settings') {
+        if (settingsPage) {
+          settingsPage.classList.remove('hidden');
+          updateIosToggle();
+          updateAutoRefreshIosToggle();
+        }
+      }
+    }
+
+    function openAboutFromSettings() {
+      const settingsPage = document.getElementById('settingsPage');
+      const aboutPage = document.getElementById('aboutPage');
+      if (settingsPage) settingsPage.classList.add('hidden');
+      if (aboutPage) aboutPage.classList.remove('hidden');
+    }
+
+    function backToSettings() {
+      const aboutPage = document.getElementById('aboutPage');
+      const settingsPage = document.getElementById('settingsPage');
+      if (aboutPage) aboutPage.classList.add('hidden');
+      if (settingsPage) settingsPage.classList.remove('hidden');
+    }
+
+    /* 手机端历史列表渲染 */
+    async function renderMobileHistoryList(bustCache) {
+      const rows = await cachedFetch('data/history.json', bustCache);
+      const list = document.getElementById('historyListMobile');
+      if (!list) return;
+      if (rows.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">暂无历史记录</p>';
+        return;
+      }
+      list.innerHTML = rows.map(r => {
+        const hasPassed = r.filtered_tokens > 0;
+        const dotHtml = hasPassed ? '<span class="hist-dot"></span>' : '';
+        return `<div class="hist-row${activeHistoryId === r.id ? ' active' : ''}" onclick="loadScanMobile(${r.id})" data-id="${r.id}">
+        <span class="ht">${r.scan_time}</span>
+        <span class="hist-stats">新币:${r.new_token_count != null ? r.new_token_count : '?'} | 队列:${r.queue_size != null ? r.queue_size : r.total_tokens} | 淘汰:${r.eliminated_count || 0} | ${dotHtml}精筛:<span class="hv">${r.filtered_tokens}</span></span>
+      </div>`;
+      }).join('');
+    }
+
+    async function loadScanMobile(id) {
+      try {
+        const data = await cachedFetch('data/scans/' + id + '.json');
+        renderData(data);
+        updateHistoryHighlight(id);
+        updateHistoryPageHighlight(id);
+        switchPage('home');
+        showToast('已加载 #' + id);
+      } catch (e) { showToast('加载失败'); }
+    }
+
+    function updateHistoryPageHighlight(id) {
+      const list = document.getElementById('historyListMobile');
+      if (!list) return;
+      list.querySelectorAll('.hist-row').forEach(row => {
+        row.classList.toggle('active', row.dataset.id == id);
+      });
+    }
+
+    function updateHistoryHighlight(id) {
+      activeHistoryId = id;
+      document.querySelectorAll('.hist-row').forEach(row => {
+        row.classList.toggle('active', row.dataset.id == id);
+      });
+    }
+
+    async function cachedFetch(url, bustCache) {
+      if (!bustCache && cache[url]) return cache[url];
+      const fetchUrl = bustCache ? url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now() : url;
+      const res = await fetch(fetchUrl);
+      const data = await res.json();
+      cache[url] = data;
+      return data;
+    }
+
+    async function loadLatest() {
+      try {
+        const data = await cachedFetch('data/latest.json', true);
+        renderData(data);
+        await renderMobileHistoryList(true);
+      } catch (e) { console.error(e); }
+    }
+
+    function fmtPrice(p) {
+      if (!p || p === 0) return '--';
+      if (p < 0.000001) {
+        const digits = Math.max(8, Math.ceil(-Math.log10(p)) + 3);
+        return p.toFixed(digits);
+      }
+      if (p < 0.01) return p.toFixed(8);
+      return p.toFixed(6);
+    }
+
+    function fmtProgress(p) {
+      if (p === null || p === undefined || p === 0) return '--';
+      return (p * 100).toFixed(1) + '%';
+    }
+
+    function fmtLiq(t) {
+      const liq = t.liquidity || 0;
+      const progress = t.progress || 0;
+      if (progress >= 1 && liq > 0) return '$' + fmtNum(liq);
+      return '';
+    }
+
+    function fmtNum(n) {
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return n.toFixed(0);
+    }
+
+    function shortAddr(addr) {
+      if (!addr || addr.length <= 16) return addr;
+      return addr.slice(0, 9) + '…' + addr.slice(-6);
+    }
+
+    function fmtAge(hours) {
+      if (hours == null) return '--';
+      if (hours < 0) return '刚创建';
+      if (hours < 1) return Math.round(hours * 60) + '分';
+      if (hours < 24) return hours.toFixed(1) + 'h';
+      return (hours / 24).toFixed(1) + '天';
+    }
+
+    function detectSource(addr, source) {
+      if (source === 'flap') return 'flap';
+      if (source === 'four.meme') return 'four.meme';
+      if (!addr) return 'four.meme';
+      const suffix = addr.slice(-4).toLowerCase();
+      if (suffix === '8888' || suffix === '7777') return 'flap';
+      return 'four.meme';
+    }
+
+    function platformLink(addr, source) {
+      const src = detectSource(addr, source);
+      if (src === 'flap') {
+        return `<a class="link-flap" href="https://flap.sh/bnb/${addr}" target="_blank" rel="noopener">Flap</a>`;
+      }
+      return `<a class="link-4m" href="https://four.meme/token/${addr}" target="_blank" rel="noopener">4M</a>`;
+    }
+
+    function sourceBadge(addr, source) {
+      const src = detectSource(addr, source);
+      if (src === 'flap') {
+        return '<span class="source-badge badge-flap"><img src="https://flap.sh/_next/image?url=%2Flogo.png&w=64&q=75" alt="Flap">Flap</span>';
+      }
+      return '<span class="source-badge badge-4m"><img src="https://four.meme/_next/static/media/logo-square.0bbm~1kye3wos.svg" alt="4M">4M</span>';
+    }
+
+    function addrHtml(addr, source) {
+      return `<div class="addr-cell">
+        <span class="addr-text" title="${addr}">${shortAddr(addr)}</span>
+        <span class="addr-links">
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink(addr, source)}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </span>
+      </div>`;
+    }
+
+    function buildAllTags(token) {
+      let html = '';
+      if (token.is_quality_deployer) {
+        html += '<span class="tag tag-boost" title="该开发者曾发过10倍以上涨幅代币">⭐优质开发者</span>';
+      }
+      // 加分标签 (bonus_tags)
+      if (token.bonus_tags && token.bonus_tags.length > 0) {
+        for (const bt of token.bonus_tags) {
+          let cls = 'tag-bonus';
+          if (bt.includes('强卖压')) cls = 'tag-bonus-bad';
+          else if (bt.includes('强买压') || bt.includes('优质开发者') || bt.includes('持币≥1k') || bt.includes('持仓合理')) cls = 'tag-bonus-good';
+          else if (bt.includes('庄家控盘')) cls = 'tag-bonus-warn';
+          html += `<span class="tag ${cls}" title="加分标签">${esc(bt)}</span>`;
+        }
+      }
+      if (token.wallet_signals && token.wallet_signals.length > 0) {
+        const iconMap = { '开发者加仓': ['💰', 'tag-dev-buy'], '开发者加池子': ['🏊', 'tag-dev-lp'], '聪明钱加仓': ['🧠', 'tag-smart-buy'] };
+        for (const s of token.wallet_signals) {
+          const [icon, cls] = iconMap[s] || ['💰', 'tag-dev-buy'];
+          html += `<span class="tag ${cls}" title="${esc(s)}">${icon}${esc(s)}</span>`;
+        }
+      }
+      if (token.is_copycat && token.copycat_count > 0) {
+        html += `<span class="tag tag-copycat" title="${token.copycat_count}个同名仿盘">🔥${token.copycat_count}仿</span>`;
+      }
+      if (token.boosts > 0) {
+        html += `<span class="tag tag-boost" title="DexScreener Boost: ${token.boosts}个活跃推广">🚀${token.boosts}Boost</span>`;
+      }
+      const sl = token.social_links;
+      if (sl) {
+        if (sl.twitter) html += `<span class="tag tag-twitter"><a href="${esc(sl.twitter)}" target="_blank" rel="noopener">𝕏</a></span>`;
+        if (sl.telegram) html += `<span class="tag tag-telegram"><a href="${esc(sl.telegram)}" target="_blank" rel="noopener">TG</a></span>`;
+        if (sl.website) html += `<span class="tag tag-website"><a href="${esc(sl.website)}" target="_blank" rel="noopener">Web</a></span>`;
+      }
+      return html || '<span style="color:var(--text-muted)">--</span>';
+    }
+
+    function renderMarketSentiment(ms) {
+      const mobileBar = document.getElementById('mobileSentimentBar');
+      const mobileIcon = document.getElementById('mobileSentimentIcon');
+      const mobileText = document.getElementById('mobileSentimentText');
+      const mobileDetail = document.getElementById('mobileSentimentDetail');
+
+      if (!ms) {
+        if (mobileBar) mobileBar.classList.add('hidden');
+        return;
+      }
+
+      const isBullish = ms.is_bullish;
+      const arrow = isBullish ? '↑' : '↓';
+      const label = isBullish ? '向上' : '向下';
+      const cls = isBullish ? 'bullish' : 'bearish';
+      const gi = (ms.gas_index * 100).toFixed(1);
+      const gd = ms.gas_detail || {};
+      const ethStr = gd.eth_gas_ratio != null ? (gd.eth_gas_ratio * 100).toFixed(0) + '%' : 'N/A';
+      const bscStr = gd.bsc_gas_ratio != null ? (gd.bsc_gas_ratio * 100).toFixed(0) + '%' : 'N/A';
+      const solStr = gd.sol_tps != null ? Math.round(gd.sol_tps) + 'tps' : 'N/A';
+      const ago = ms.gas_12h_ago != null ? (ms.gas_12h_ago * 100).toFixed(1) + '%' : '无数据';
+      const detailText = `Gas ${gi}% (ETH:${ethStr} BSC:${bscStr} SOL:${solStr}) · 12h前:${ago}`;
+
+      if (mobileBar) {
+        mobileBar.classList.remove('hidden', 'bullish', 'bearish');
+        mobileBar.classList.add(cls);
+      }
+      if (mobileIcon) mobileIcon.textContent = arrow;
+      if (mobileText) mobileText.textContent = `大盘 ${label}`;
+      if (mobileDetail) mobileDetail.textContent = detailText;
+    }
+
+    
+function renderData(data) {
+      currentData = data;
+      document.getElementById('scanTime').textContent = data.scanTime || '--';
+
+      // 近48小时淘汰数
+      if (data.eliminatedTotal48h != null) {
+        const heroEl = document.getElementById('heroElimCount');
+        if (heroEl) heroEl.textContent = data.eliminatedTotal48h.toLocaleString();
+      }
+
+      // hero 显示精筛总数
+      updateHeroFilteredCount();
+
+      // 渲染大盘情绪
+      renderMarketSentiment(data.marketSentiment);
+
+      // 更新 tab 标题中的数字
+      const qLen = (data.queue || []).length;
+      const bLen = 0;
+      const fLen = data.filteredTokens || 0;
+      const eLen = (data.eliminatedThisRound || []).length;
+      const rLen = (data.rejectedAtEntry || []).length;
+      document.querySelectorAll('#tabBar .tab-btn').forEach(btn => {
+        const tab = btn.dataset.tab;
+        if (tab === 'filtered') btn.textContent = '精筛 ' + fLen;
+        else if (tab === 'queue') btn.textContent = '存活 ' + qLen;
+        else if (tab === 'breakthrough') btn.textContent = '突破 ' + bLen;
+        else if (tab === 'eliminated') btn.textContent = '淘汰 ' + eLen;
+        else if (tab === 'rejected') btn.textContent = '拒绝 ' + rLen;
+      });
+
+      renderFiltered(data);
+      renderQueue(data);
+      renderBreakthrough(data);
+      renderEliminated(data);
+      renderRejected(data);
+    }
+
+    function renderFiltered(data) {
+      const noData = document.getElementById('noData');
+      const cardList = document.getElementById('cardList');
+      const tokens = ((data.filteredTokens > 0 ? data.tokens : []) || []).slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+      cleanupVirtualList('filtered');
+
+      if (tokens.length === 0) {
+        cardList.innerHTML = '';
+        noData.classList.remove('hidden');
+        return;
+      }
+      noData.classList.add('hidden');
+      renderVirtualList(cardList, tokens, (t, i) => buildTokenCard(t, i, searchMode), 'filtered');
+    }
+
+    function renderQueue(data) {
+      const noQueue = document.getElementById('noQueue');
+      const queueCardList = document.getElementById('queueCardList');
+      const items = (data.queue || []).slice().sort((a, b) => (b.holders || 0) - (a.holders || 0));
+
+      cleanupVirtualList('queue');
+
+      if (items.length === 0) {
+        queueCardList.innerHTML = '';
+        noQueue.classList.remove('hidden');
+        return;
+      }
+      noQueue.classList.add('hidden');
+      renderVirtualList(queueCardList, items, (t, i) => buildQueueCard(t, i, searchMode), 'queue');
+    }
+
+    function renderBreakthrough(data) {
+      const noBreakthrough = document.getElementById('noBreakthrough');
+      const cardList = document.getElementById('breakthroughCardList');
+      const items = (data.breakthroughTokens || []).slice().sort((a, b) => (b.breakthrough_at || 0) - (a.breakthrough_at || 0));
+
+      cleanupVirtualList('breakthrough');
+
+      if (items.length === 0) {
+        cardList.innerHTML = '';
+        noBreakthrough.classList.remove('hidden');
+        return;
+      }
+      noBreakthrough.classList.add('hidden');
+      renderVirtualList(cardList, items, (t, i) => buildBreakthroughCard(t, i, searchMode), 'breakthrough');
+    }
+
+    function renderEliminated(data) {
+      const noElim = document.getElementById('noEliminated');
+      const cardList = document.getElementById('eliminatedCardList');
+      const items = (data.eliminatedThisRound || []);
+
+      cleanupVirtualList('eliminated');
+
+      if (items.length === 0) {
+        cardList.innerHTML = '';
+        noElim.classList.remove('hidden');
+        return;
+      }
+      noElim.classList.add('hidden');
+      renderVirtualList(cardList, items, (t, i) => buildElimCard(t, i, false), 'eliminated');
+    }
+
+    function renderRejected(data) {
+      const noRej = document.getElementById('noRejected');
+      const cardList = document.getElementById('rejectedCardList');
+      const items = (data.rejectedAtEntry || []);
+
+      cleanupVirtualList('rejected');
+
+      if (items.length === 0) {
+        cardList.innerHTML = '';
+        noRej.classList.remove('hidden');
+        return;
+      }
+      noRej.classList.add('hidden');
+      renderVirtualList(cardList, items, (t, i) => buildElimCard(t, i, false), 'rejected');
+    }
+
+    /* ===== 通用卡片构建函数 ===== */
+    function buildTokenCard(t, i, showScanTime) {
+      const addr = t.address || '';
+      const shortA = addr.length > 16 ? addr.slice(0, 8) + '...' + addr.slice(-6) : addr;
+      const tags = buildAllTags(t);
+      const priceRatio = t.price_ratio != null ? (t.price_ratio * 100).toFixed(1) + '%' : '--';
+      const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
+      const bonusBadge = (t.bonus_score != null && t.bonus_score > 0)
+        ? `<span class="bonus-badge" title="加分总分">🎖${t.bonus_score}</span>` : '';
+      return `<div class="token-card">
+        ${scanTimeHtml}
+        <div class="card-top">
+          <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span>${bonusBadge}</span>
+          <span class="card-holders">${t.holders || 0}</span>
+        </div>
+        <div class="card-addr-row">
+          <span class="card-addr-text">${shortA}</span>
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink(addr, t.source)}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </div>
+        <div class="card-price-row">
+          <span>现:${fmtPrice(t.price)}</span>
+          <span>高:${fmtPrice(t.max_price)}</span>
+          <span>现/高:${priceRatio}</span>
+          <span>${fmtLiq(t)}</span>
+          <span>进度:${fmtProgress(t.progress)}</span>
+          ${t.price_change_h1 ? `<span style="color:${t.price_change_h1 >= 0 ? 'var(--link-green)' : 'var(--danger-text)'}">1h:${t.price_change_h1 >= 0 ? '+' : ''}${t.price_change_h1.toFixed(1)}%</span>` : ''}
+        </div>
+        <div class="card-social">${tags}</div>
+        <div class="card-meta">
+          <span>${fmtAge(t.age_hours)}</span>
+          <span>峰值 ${t.peak_holders || 0}</span>
+        </div>
+      </div>`;
+    }
+
+    function buildQueueCard(t, i, showScanTime) {
+      const addr = t.address || '';
+      const shortA = addr.length > 16 ? addr.slice(0, 8) + '...' + addr.slice(-6) : addr;
+      const tagsHtml = buildAllTags(t);
+      const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
+      return `<div class="token-card">
+        ${scanTimeHtml}
+        <div class="card-top">
+          <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span></span>
+          <span class="card-holders">${t.holders || 0}</span>
+        </div>
+        <div class="card-addr-row">
+          <span class="card-addr-text">${shortA}</span>
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink(addr, t.source)}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </div>
+        <div class="card-price-row">
+          <span>现:${fmtPrice(t.price)}</span>
+          <span>峰:${fmtPrice(t.peak_price)}</span>
+          <span>${fmtLiq(t)}</span>
+          <span>进度:${fmtProgress(t.progress)}</span>
+          ${t.price_change_h1 ? `<span style="color:${t.price_change_h1 >= 0 ? 'var(--link-green)' : 'var(--danger-text)'}">1h:${t.price_change_h1 >= 0 ? '+' : ''}${t.price_change_h1.toFixed(1)}%</span>` : ''}
+        </div>
+        ${tagsHtml ? '<div class="card-social">' + tagsHtml + '</div>' : ''}
+        <div class="card-meta">
+          <span>${fmtAge(t.age_hours)}</span>
+          <span>峰值 ${t.peak_holders || 0}</span>
+        </div>
+      </div>`;
+    }
+
+    function buildBreakthroughCard(t, i, showScanTime) {
+      const addr = t.address || '';
+      const shortA = addr.length > 16 ? addr.slice(0, 8) + '...' + addr.slice(-6) : addr;
+      const tagsHtml = buildAllTags(t);
+      const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
+      return `<div class="token-card">
+        ${scanTimeHtml}
+        <div class="card-top">
+          <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">🚀${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span></span>
+          <span class="card-holders">${t.holders || 0}</span>
+        </div>
+        <div class="card-addr-row">
+          <span class="card-addr-text">${shortA}</span>
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink(addr, t.source)}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </div>
+        <div class="card-price-row">
+          <span>现:${fmtPrice(t.price)}</span>
+          <span>峰:${fmtPrice(t.peak_price)}</span>
+          <span>${fmtLiq(t)}</span>
+          <span>进度:${fmtProgress(t.progress)}</span>
+        </div>
+        ${tagsHtml ? '<div class="card-social">' + tagsHtml + '</div>' : ''}
+        <div class="card-meta">
+          <span>${fmtAge(t.age_hours)}</span>
+          <span>峰值 ${t.peak_holders || 0}</span>
+        </div>
+      </div>`;
+    }
+
+    function buildElimCard(t, i, showScanTime) {
+      const addr = t.address || '';
+      const shortA = addr.length > 16 ? addr.slice(0, 8) + '...' + addr.slice(-6) : addr;
+      const tagsHtml = buildAllTags(t);
+      const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
+      const reason = t.reason || '';
+      const isScam = reason.includes('诈骗');
+      const scamTag = isScam ? '<span class="tag tag-scam" title="该开发者多次发布诈骗币，已被系统自动拉黑">🚨诈骗开发者</span>' : '';
+      const reasonHtml = reason ? `<div style="margin-top:8px">${scamTag}<span class="elim-reason">${esc(reason)}</span></div>` : '';
+      return `<div class="token-card">
+        ${scanTimeHtml}
+        <div class="card-top">
+          <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span></span>
+          <span class="card-holders">${t.holders || 0}</span>
+        </div>
+        <div class="card-addr-row">
+          <span class="card-addr-text">${shortA}</span>
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink(addr, t.source)}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </div>
+        <div class="card-price-row">
+          <span>现:${fmtPrice(t.price)}</span>
+          <span>峰:${fmtPrice(t.peak_price || t.max_price)}</span>
+          <span>${fmtLiq(t)}</span>
+          <span>进度:${fmtProgress(t.progress)}</span>
+        </div>
+        ${reasonHtml}
+        ${tagsHtml ? '<div class="card-social">' + tagsHtml + '</div>' : ''}
+        <div class="card-meta">
+          <span>${fmtAge(t.age_hours)}</span>
+          <span>峰值 ${t.peak_holders || 0}</span>
+        </div>
+      </div>`;
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('#tabBar .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.getElementById('tokenTable').classList.toggle('hidden', tab !== 'filtered');
+      document.getElementById('queueTable').classList.toggle('hidden', tab !== 'queue');
+      document.getElementById('breakthroughTable').classList.toggle('hidden', tab !== 'breakthrough');
+      document.getElementById('eliminatedTable').classList.toggle('hidden', tab !== 'eliminated');
+      document.getElementById('rejectedTable').classList.toggle('hidden', tab !== 'rejected');
+      
+      if (!currentData) return;
+      
+      if (tab === 'filtered') {
+        requestAnimationFrame(() => renderFiltered(currentData));
+      } else if (tab === 'queue') {
+        requestAnimationFrame(() => renderQueue(currentData));
+      } else if (tab === 'breakthrough') {
+        requestAnimationFrame(() => renderBreakthrough(currentData));
+      } else if (tab === 'eliminated') {
+        requestAnimationFrame(() => renderEliminated(currentData));
+      } else if (tab === 'rejected') {
+        requestAnimationFrame(() => renderRejected(currentData));
+      }
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function copyAddr(addr) {
+      navigator.clipboard.writeText(addr).then(() => showToast('已复制')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = addr;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('已复制');
+      });
+    }
+
+    function copySymbol(symbol) {
+      navigator.clipboard.writeText(symbol).then(() => showToast('已复制 ' + symbol)).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = symbol;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('已复制 ' + symbol);
+      });
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.remove('hidden');
+      setTimeout(() => t.classList.add('hidden'), 1500);
+    }
+
+    async function goLatest() {
+      try {
+        const data = await cachedFetch('data/latest.json', true);
+        renderData(data);
+        updateHistoryHighlight(null);
+        await renderMobileHistoryList(true);
+        const mobileList = document.getElementById('historyListMobile');
+        if (mobileList) mobileList.scrollTop = 0;
+        showToast('已回到最新');
+      } catch (e) { showToast('加载失败'); }
+    }
+
+    let searchMode = false;
+
+    function isAddressQuery(q) {
+      return q.startsWith('0x') && q.length >= 10;
+    }
+
+    /* ===== 通用搜索逻辑 ===== */
+    async function performSearch(q, addrSearch) {
+      let allResults;
+      try {
+        const index = await cachedFetch('data/search-index.json');
+        const matched = index.filter(t => {
+          const n = (t.n || '').toLowerCase();
+          const s = (t.s || '').toLowerCase();
+          const a = (t.a || '').toLowerCase();
+          return n.includes(q) || s.includes(q) || a.includes(q);
+        });
+
+        let toMap;
+        if (addrSearch) {
+          toMap = matched;
+        } else {
+          const latest = {};
+          for (const t of matched) {
+            const key = t.a;
+            if (!latest[key] || (t.st || '') > (latest[key].st || '')) {
+              latest[key] = t;
+            }
+          }
+          toMap = Object.values(latest);
+        }
+
+        allResults = toMap.map(t => ({
+          address: t.a, name: t.n, symbol: t.s, holders: t.h,
+          created_at: t.c, price: t.p, max_price: t.mp || t.pp, ath: t.ath || t.mp || t.pp,
+          price_ratio: t.pr, age_hours: t.ah, social_count: t.sc,
+          social_links: t.sl, copycat_count: t.cc || 0,
+          is_copycat: t.ic || false, total_supply: t.ts, day1_vol: t.dv,
+          progress: t.pg, liquidity: t.lq || 0, raised_amount: t.ra || 0,
+          market_cap: t.mc || 0, wallet_signals: t.ws || [], _scanTime: t.st,
+          _source: t.src || 'filtered',
+          reason: t.rsn || '',
+          peak_price: t.pp || t.mp || 0,
+          peak_holders: t.ph || 0,
+          price_change_h1: t.pch1 || 0,
+          price_change_h24: t.pch24 || 0,
+          boosts: t.bst || 0,
+        }));
+      } catch (_) {
+        const history = await cachedFetch('data/history.json');
+        const seen = new Set();
+        allResults = [];
+        for (const row of history) {
+          const scanData = await cachedFetch('data/scans/' + row.id + '.json');
+          const sources = [
+            { list: scanData.tokens || [], src: 'filtered' },
+            { list: scanData.queue || [], src: 'queue' },
+            { list: scanData.breakthroughTokens || [], src: 'breakthrough' },
+            { list: scanData.eliminatedThisRound || [], src: 'eliminated' },
+            { list: scanData.rejectedAtEntry || [], src: 'rejected' },
+          ];
+          for (const { list, src } of sources) {
+            for (const t of list) {
+              const key = t.address || '';
+              if (!addrSearch && seen.has(key)) continue;
+              const name = (t.name || '').toLowerCase();
+              const symbol = (t.symbol || '').toLowerCase();
+              const addr = key.toLowerCase();
+              if (name.includes(q) || symbol.includes(q) || addr.includes(q)) {
+                if (!addrSearch) seen.add(key);
+                allResults.push({ ...t, _scanTime: scanData.scanTime, _source: src });
+              }
+            }
+          }
+        }
+      }
+      return allResults;
+    }
+
+    /* ===== 手机端搜索页面 ===== */
+    let mobileSearchData = null;
+    let currentSearchTab = 's-filtered';
+
+    async function doMobileSearch() {
+      const input = document.getElementById('mobileSearchInput');
+      const q = input.value.trim().toLowerCase();
+      if (!q) { clearMobileSearch(); return; }
+
+      showToast('搜索中...');
+      searchMode = true;
+      const addrSearch = isAddressQuery(q);
+
+      try {
+        const allResults = await performSearch(q, addrSearch);
+
+        const filtered = allResults.filter(t => t._source === 'filtered');
+        const queue = allResults.filter(t => t._source === 'queue');
+        const breakthroughResults = allResults.filter(t => t._source === 'breakthrough');
+        const eliminated = allResults.filter(t => t._source === 'eliminated');
+        const rejected = allResults.filter(t => t._source === 'rejected');
+
+        if (addrSearch) {
+          [filtered, queue, breakthroughResults, eliminated, rejected].forEach(arr =>
+            arr.sort((a, b) => (b._scanTime || '').localeCompare(a._scanTime || '')));
+        } else {
+          allResults.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        }
+
+        mobileSearchData = { filtered, queue, breakthrough: breakthroughResults, eliminated, rejected };
+
+        const info = document.getElementById('mobileSearchInfo');
+        document.getElementById('searchCardWrapper').style.display = '';
+        const parts = [];
+        if (filtered.length) parts.push(`精筛${filtered.length}`);
+        if (queue.length) parts.push(`队列${queue.length}`);
+        if (breakthroughResults.length) parts.push(`已突破${breakthroughResults.length}`);
+        if (eliminated.length) parts.push(`淘汰${eliminated.length}`);
+        if (rejected.length) parts.push(`入场淘汰${rejected.length}`);
+        const uniqueAddrs = new Set(allResults.map(t => t.address)).size;
+        const countDesc = addrSearch
+          ? `<span class="highlight">${uniqueAddrs}</span>个代币, <span class="highlight">${allResults.length}</span>条记录`
+          : `<span class="highlight">${allResults.length}</span>个代币`;
+        info.innerHTML = `"<span class="highlight">${esc(q)}</span>" ${countDesc} (精筛${filtered.length} · 队列${queue.length} · 突破${breakthroughResults.length} · 淘汰${eliminated.length} · 入场${rejected.length})<span class="clear-search" onclick="clearMobileSearch()">清除</span>`;
+
+        document.getElementById('searchEmptyState').style.display = 'none';
+        renderSearchTab(currentSearchTab);
+        showToast(allResults.length + ' 条结果');
+      } catch (e) {
+        console.error(e);
+        showToast('搜索失败');
+      }
+    }
+
+    function switchSearchTab(tab) {
+      currentSearchTab = tab;
+      document.querySelectorAll('#searchTabBar .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
+      renderSearchTab(tab);
+    }
+
+    function renderSearchTab(tab) {
+      if (!mobileSearchData) return;
+      const containers = {
+        's-filtered': 'searchFilteredCards',
+        's-queue': 'searchQueueCards',
+        's-breakthrough': 'searchBreakthroughCards',
+        's-eliminated': 'searchEliminatedCards',
+        's-rejected': 'searchRejectedCards',
+      };
+
+      Object.values(containers).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+
+      const containerId = containers[tab];
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      el.style.display = 'block';
+
+      const dataMap = {
+        's-filtered': mobileSearchData.filtered,
+        's-queue': mobileSearchData.queue,
+        's-breakthrough': mobileSearchData.breakthrough,
+        's-eliminated': mobileSearchData.eliminated,
+        's-rejected': mobileSearchData.rejected,
+      };
+
+      const items = dataMap[tab] || [];
+      if (items.length === 0) {
+        el.innerHTML = `<div class="no-data"><span class="no-data-icon">📭</span><div class="no-data-text">无结果</div></div>`;
+        return;
+      }
+
+      const cardBuilder = (tab === 's-filtered') ? (t, i) => buildTokenCard(t, i, true)
+        : (tab === 's-queue') ? (t, i) => buildQueueCard(t, i, true)
+          : (tab === 's-breakthrough') ? (t, i) => buildBreakthroughCard(t, i, true)
+            : (t, i) => buildElimCard(t, i, true);
+
+      const scrollContainer = document.getElementById('searchResultsArea');
+      renderVirtualList(el, items, cardBuilder, 'search-' + tab, scrollContainer);
+    }
+
+    function clearMobileSearch() {
+      mobileSearchData = null;
+      searchMode = false;
+      currentSearchTab = 's-filtered';
+      document.getElementById('mobileSearchInput').value = '';
+      document.getElementById('searchCardWrapper').style.display = 'none';
+      document.getElementById('searchEmptyState').style.display = '';
+      ['searchFilteredCards', 'searchQueueCards', 'searchBreakthroughCards', 'searchEliminatedCards', 'searchRejectedCards'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+      });
+    }
+
+    /* ===== 精筛成功率 ===== */
+    let currentMobileQualityTab = 'success';
+    let qualityStatsData = null;
+
+    async function loadQualityStats() {
+      try {
+        qualityStatsData = await cachedFetch('data/quality-stats.json', true);
+        updateHeroFilteredCount();
+      } catch (e) {
+        console.error('加载精筛成功率失败:', e);
+      }
+    }
+
+    function updateHeroFilteredCount() {
+      const el = document.getElementById('heroFilteredCount');
+      if (!el) return;
+      if (qualityStatsData) {
+        // 优先使用后端返回的 totalCount（与历史记录精筛总和匹配）
+        const total = qualityStatsData.totalCount || ((qualityStatsData.successCount || 0) + (qualityStatsData.failCount || 0));
+        el.textContent = total;
+      } else if (currentData) {
+        el.textContent = currentData.filteredTokens || '0';
+      }
+    }
+
+    function renderMobileQualityPanel() {
+      if (!qualityStatsData) return;
+      const d = qualityStatsData;
+      const tp = d.tpTriggerPct || 50;
+      const mp = d.missedThresholdPct || 100;
+      const gp = d.gainerThresholdPct || 50;
+
+      const badge = document.getElementById('mobileQualityRateBadge');
+      if (badge) badge.textContent = d.successRate + '%';
+      const sc = document.getElementById('mobileQualitySuccessCount');
+      if (sc) sc.textContent = d.successCount;
+      const fc = document.getElementById('mobileQualityFailCount');
+      if (fc) fc.textContent = d.failCount;
+      const mc = document.getElementById('mobileQualityMissedCount');
+      if (mc) mc.textContent = d.missedCount || 0;
+      const gc = document.getElementById('mobileQualityGainerCount');
+      if (gc) gc.textContent = d.gainerCount || 0;
+      const sl = document.getElementById('mobileQualitySuccessLabel');
+      if (sl) sl.textContent = '成功 (涨≥' + tp + '%)';
+      const fl = document.getElementById('mobileQualityFailLabel');
+      if (fl) fl.textContent = '失败 (<' + tp + '%)';
+      const ml = document.getElementById('mobileQualityMissedLabel');
+      if (ml) ml.textContent = '漏掉 (涨≥' + mp + '%)';
+      const gl = document.getElementById('mobileQualityGainerLabel');
+      if (gl) gl.textContent = '涨幅≥' + gp + '%';
+
+      renderQualityList('mobileQualitySuccessList', d.successTokens || [], false, 'success');
+      renderQualityList('mobileQualityFailList', d.failTokens || [], false, 'fail');
+      renderQualityList('mobileQualityMissedList', d.missedTokens || [], true, 'missed');
+      renderQualityList('mobileQualityGainerList', d.gainerTokens || [], false, 'gainers');
+    }
+
+    // 增强版卡片: 使用首页卡片样式，包含更多信息
+    function buildQualityCard(t, source) {
+      const addr = t.address || '';
+      const shortA = addr.length > 16 ? addr.slice(0, 8) + '...' + addr.slice(-6) : addr;
+      const peakGrowthCls = t.peakGrowth >= 0 ? 'positive' : 'negative';
+      const peakGrowthSign = t.peakGrowth >= 0 ? '+' : '';
+      const latestGrowthCls = t.latestGrowth >= 0 ? 'positive' : 'negative';
+      const latestGrowthSign = t.latestGrowth >= 0 ? '+' : '';
+
+      // 来源标签 (涨幅榜专属)
+      let sourceTag = '';
+      if (source === 'gainers') {
+        if (t.source === 'filtered') {
+          sourceTag = '<span class="tag tag-bonus-good" style="font-size:9px;padding:2px 6px;margin-right:4px">✅精筛推荐</span>';
+        } else {
+          sourceTag = '<span class="tag tag-bonus-warn" style="font-size:9px;padding:2px 6px;margin-right:4px">🔥漏掉</span>';
+        }
+      }
+
+      // 淘汰原因 (仅漏掉的好币显示)
+      const elimReasonHtml = source === 'missed' && t.elimReason ? `<span class="quality-card-elim">${esc(t.elimReason)}</span>` : '';
+
+      // 社交链接
+      let socialHtml = '';
+      const sl = t.socialLinks || {};
+      if (sl.twitter) socialHtml += `<span class="tag tag-twitter"><a href="${esc(sl.twitter)}" target="_blank" rel="noopener">𝕏</a></span>`;
+      if (sl.telegram) socialHtml += `<span class="tag tag-telegram"><a href="${esc(sl.telegram)}" target="_blank" rel="noopener">TG</a></span>`;
+      if (sl.website) socialHtml += `<span class="tag tag-website"><a href="${esc(sl.website)}" target="_blank" rel="noopener">Web</a></span>`;
+
+      // 仿盘标签
+      if (t.copycatCount > 0) {
+        socialHtml += `<span class="tag tag-copycat" title="${t.copycatCount}个同名仿盘">🔥${t.copycatCount}仿</span>`;
+      }
+
+      // 根据来源选择平台链接
+      const tokenSource = t.source || 'four.meme';
+      const platformLink = tokenSource === 'flap'
+        ? `<a class="link-flap" href="https://flap.sh/bnb/${addr}" target="_blank" rel="noopener">Flap</a>`
+        : `<a class="link-4m" href="https://four.meme/token/${addr}" target="_blank" rel="noopener">4M</a>`;
+
+      return `<div class="token-card">
+        <div class="card-top">
+          <span>${sourceTag}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="${esc(t.name || '')}">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span></span>
+          <span class="card-holders" style="font-size:16px" title="峰值涨幅">${peakGrowthSign}${t.peakGrowth}%</span>
+        </div>
+        <div class="card-addr-row">
+          <span class="card-addr-text">${shortA}</span>
+          <button class="copy-btn" onclick="copyAddr('${addr}')">Copy</button>
+          <a class="link-bsc" href="https://bscscan.com/token/${addr}" target="_blank" rel="noopener">BSC</a>
+          ${platformLink}
+          <a class="link-bn" href="https://web3.binance.com/zh-CN/token/bsc/${addr}" target="_blank" rel="noopener">币安</a>
+        </div>
+        <div class="card-price-row">
+          <span>筛:${fmtPrice(t.entryPrice)}</span>
+          <span>峰:${fmtPrice(t.peakPrice)}</span>
+          <span>现:${fmtPrice(t.latestPrice)}</span>
+          <span class="${latestGrowthCls}" style="font-weight:600">现 ${latestGrowthSign}${t.latestGrowth}%</span>
+        </div>
+        <div class="card-price-row" style="margin-top:2px">
+          <span>持币:${t.entryHolders || 0}${t.peakHolders > 0 && t.peakHolders !== t.entryHolders ? ' (峰' + t.peakHolders + ')' : ''}</span>
+          <span>${esc(t.entryTime || '')}</span>
+          ${t.entryAgeHours != null ? '<span>龄:' + fmtAge(t.entryAgeHours) + '</span>' : ''}
+          ${elimReasonHtml}
+        </div>
+        ${socialHtml ? '<div class="card-social">' + socialHtml + '</div>' : ''}
+      </div>`;
+    }
+
+    function renderQualityList(containerId, tokens, showElimReason, source) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      if (tokens.length === 0) {
+        el.innerHTML = '<div class="quality-empty">暂无数据</div>';
+        return;
+      }
+      // 使用增强版卡片
+      el.innerHTML = tokens.map(t => buildQualityCard(t, source)).join('');
+    }
+
+    function switchMobileQualityTab(tab) {
+      currentMobileQualityTab = tab;
+      document.querySelectorAll('#qualityPage .quality-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.mqtab === tab));
+      document.getElementById('mobileQualitySuccessList').classList.toggle('hidden', tab !== 'success');
+      document.getElementById('mobileQualityFailList').classList.toggle('hidden', tab !== 'fail');
+      document.getElementById('mobileQualityMissedList').classList.toggle('hidden', tab !== 'missed');
+      document.getElementById('mobileQualityGainerList').classList.toggle('hidden', tab !== 'gainers');
+    }
+
+    loadLatest();
+    loadQualityStats();
+
+    // 自动刷新：每60秒轮询最新数据
+    setInterval(async () => {
+      if (!autoRefreshEnabled || searchMode || activeHistoryId != null) return;
+      try {
+        await loadLatest();
+        await loadQualityStats();
+      } catch (_) { }
+    }, 60 * 1000);
+  </script>
+</body>
+
+</html>
