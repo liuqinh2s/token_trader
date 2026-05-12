@@ -5395,6 +5395,7 @@ def scan_once(cfg: dict) -> dict:
     # 输出扫描结果给前端 (用前端去重后的结果)
     # 包含第一轮买入的代币 (如果被买入)
     first_round_for_frontend = None
+    first_round_buy = None  # 初始化变量，避免作用域问题
     if first_round_buy:
         token = first_round_buy["token"]
         addr = token.get("address", "")
@@ -5515,7 +5516,6 @@ def scan_once(cfg: dict) -> dict:
                     "progress": token.get("progress", 0) or detail.get("progress", 0) or 0,
                 })
         
-        first_round_buy = None
         if first_round_candidates:
             # 按进度降序排序，取进度最高的第一个
             first_round_candidates.sort(key=lambda x: x["progress"], reverse=True)
