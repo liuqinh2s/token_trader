@@ -5395,7 +5395,6 @@ def scan_once(cfg: dict) -> dict:
     # 输出扫描结果给前端 (用前端去重后的结果)
     # 包含第一轮买入的代币 (如果被买入)
     first_round_for_frontend = None
-    first_round_buy = None  # 初始化变量，避免作用域问题
     if first_round_buy:
         token = first_round_buy["token"]
         addr = token.get("address", "")
@@ -5404,15 +5403,15 @@ def scan_once(cfg: dict) -> dict:
             "name": token.get("name", ""),
             "symbol": token.get("symbol", ""),
             "source": token.get("source", "four.meme"),
-            "price": token.get("price") or first_round_buy["detail"].get("price") or 0,
-            "holders": token.get("holders", 0) or first_round_buy["detail"].get("holders", 0) or 0,
+            "price": token.get("price") or 0,
+            "holders": token.get("holders", 0) or 0,
             "progress": first_round_buy["progress"],
             "createdAt": token.get("createdAt", 0),
             "_is_first_round": True,  # 标识为第一轮买入代币
             "_bonus_tags": ["第一轮买入"],
             "_bonus_score": 100,
-            "socialLinks": token.get("socialLinks", {}) or first_round_buy["detail"].get("socialLinks", {}),
-            "socialCount": token.get("socialCount", 0) or first_round_buy["detail"].get("socialCount", 0) or 0,
+            "socialLinks": token.get("socialLinks", {}) or {},
+            "socialCount": token.get("socialCount", 0) or 0,
         }
         # 添加到精筛结果前面
         quality_results_for_frontend = [first_round_for_frontend] + quality_results_for_frontend
@@ -5499,21 +5498,21 @@ def scan_once(cfg: dict) -> dict:
         # 第一轮买入策略 — v20 新增
         # 条件: 价格 0.0000032~0.000004, 币龄 < 15 分钟, 按进度降序取第一个
         # 每轮最多只买一个此类条件的代币
+        # 注意: 直接从链上发现的新代币筛选，不受入场条件限制
         # ================================================================
         first_round_candidates = []
-        for item in admitted:
-            token = item.get("token", {})
-            detail = item.get("detail") or {}
-            price = token.get("price") or detail.get("price") or 0
+        now_ms = int(time.time() * 1000)
+        for token in new_on_chain:
+            price = token.get("price", 0) or 0
             created_at = token.get("createdAt", 0)
-            age_hours = (time.time() * 1000 - created_at) / 3600000 if created_at > 0 else 999
+            age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else 999
             
             if (FIRST_ROUND_MIN_PRICE <= price <= FIRST_ROUND_MAX_PRICE 
                     and age_hours < FIRST_ROUND_MAX_AGE_HOURS):
                 first_round_candidates.append({
                     "token": token,
-                    "detail": detail,
-                    "progress": token.get("progress", 0) or detail.get("progress", 0) or 0,
+                    "detail": token,  # 简化: 直接用 token 作为 detail
+                    "progress": token.get("progress", 0) or 0,
                 })
         
         if first_round_candidates:
@@ -5522,11 +5521,11 @@ def scan_once(cfg: dict) -> dict:
             first_round_buy = first_round_candidates[0]
             token = first_round_buy["token"]
             created_at = token.get("createdAt", 0)
-            age_minutes = (time.time() * 1000 - created_at) / 60000 if created_at > 0 else 999
+            age_minutes = (int(time.time() * 1000) - created_at) / 60000 if created_at > 0 else 999
             log.info("第一轮买入候选: %s [%s] 价格=%.7f 进度=%.1f%% 币龄=%.1fmin",
                      token.get("name") or token.get("symbol") or token["address"][:16],
                      token.get("source", "unknown"),
-                     token.get("price") or first_round_buy["detail"].get("price") or 0,
+                     token.get("price") or 0,
                      first_round_buy["progress"] * 100,
                      age_minutes)
         
