@@ -2881,14 +2881,30 @@ def gt_get_pool_address(token_address: str) -> str | None:
             return None
         
         for pool in pools:
-            pool_addr = pool.get("id", "")
-            if pool_addr:
-                # 从 id 中提取地址: "networks/bsc/pools/0x1234..." -> "0x1234..."
-                if "pools/" in pool_addr:
-                    addr = pool_addr.split("pools/")[-1].lower()
-                    if addr.startswith("0x") and len(addr) == 42:
-                        log.debug("GT 获取 pool 地址成功 [%s]: %s", token_address[:16], addr[:16])
+            # 优先从 attributes.address 字段提取（最可靠）
+            attrs = pool.get("attributes", {})
+            if isinstance(attrs, dict):
+                addr_from_attr = attrs.get("address", "")
+                if addr_from_attr:
+                    addr = _normalize_address(addr_from_attr)
+                    if addr:
+                        log.debug("GT 获取 pool 地址成功 (attributes) [%s]: %s", token_address[:16], addr[:16])
                         return addr
+
+            # 兜底: 从 id 字段提取
+            # 格式可能是 "bsc_0x1234..." 或 "networks/bsc/pools/0x1234..."
+            pool_id = pool.get("id", "")
+            if pool_id:
+                if "pools/" in pool_id:
+                    raw = pool_id.split("pools/")[-1]
+                elif "_0x" in pool_id:
+                    raw = "0x" + pool_id.split("_0x", 1)[-1]
+                else:
+                    raw = pool_id
+                addr = _normalize_address(raw)
+                if addr:
+                    log.debug("GT 获取 pool 地址成功 (id) [%s]: %s", token_address[:16], addr[:16])
+                    return addr
         log.debug("GT pools API 未找到有效 pool 地址 [%s]", token_address[:16])
     except Exception as e:
         log.debug("GT 获取 pool 地址失败 [%s]: %s", token_address[:16], str(e)[:50])
