@@ -37,7 +37,9 @@ BNB 余额管理 (v18 新增):
      - 30% 以上: 中点止盈法 (价格 ≤ (最高价 + 买入价) / 2 时卖出)
   2. 固定止损: 亏损 25% 止损
   3. 动能衰竭止盈: 持币数/流动性/进度 多指标同时恶化时止盈
-  4. 超期清仓: 持仓超过 24h 且亏损 → 卖出
+  4. 超期清仓:
+     - 持仓超过 12h 且未盈利 → 卖出
+     - 持仓超过 24h 盈利不足 100% → 卖出
 
 诈骗币检测 (v19):
   - 检测规则: 1分钟K线没有连续3根及以上下跌的 → 诈骗币卖出
@@ -2553,7 +2555,9 @@ def check_sell_conditions(pos: dict, current_price: float,
          - 触发~tp_midpoint_pct 区间: 从最高价回撤 tp_drawdown_pct 即卖出
          - tp_midpoint_pct 以上: 中点止盈法, 价格 ≤ (最高价 + 买入价) / 2
       2. 固定止损: 亏损 25% 止损
-      3. 超期清仓: 持仓超过 24h 且亏损 → 卖出
+      3. 超期清仓:
+         - 持仓超过 12h 且未盈利 → 卖出
+         - 持仓超过 24h 盈利不足 100% → 卖出
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
@@ -2595,9 +2599,16 @@ def check_sell_conditions(pos: dict, current_price: float,
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
     hold_hours = hold_ms / (3600 * 1000)
 
-    expire_loss_hours = trading_cfg.get("expire_loss_hours", 24)
-    if hold_hours >= expire_loss_hours and profit_pct < 0:
-        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)"
+    # 持仓超过 12h 且未盈利 → 卖出
+    expire_no_profit_hours = trading_cfg.get("expire_no_profit_hours", 12)
+    if hold_hours >= expire_no_profit_hours and profit_pct <= 0:
+        return True, f"EXPIRE_NO_PROFIT (持仓 {hold_hours:.0f}h, 盈利 {profit_pct:.0f}%)"
+
+    # 持仓超过 24h 盈利不足 100% → 卖出
+    expire_underperform_hours = trading_cfg.get("expire_underperform_hours", 24)
+    expire_min_profit_pct = trading_cfg.get("expire_min_profit_pct", 100)
+    if hold_hours >= expire_underperform_hours and profit_pct < expire_min_profit_pct:
+        return True, f"EXPIRE_UNDERPERFORM (持仓 {hold_hours:.0f}h, 盈利 {profit_pct:.0f}% < {expire_min_profit_pct}%)"
 
     # ==================== 策略3: 固定止损 ====================
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
@@ -3092,12 +3103,12 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 hold_ms = int(time.time() * 1000) - pos["buy_time"]
                 hold_hours = hold_ms / (3600 * 1000)
                 hold_days = hold_hours / 24
-                expire_loss_hours = trading_cfg.get("expire_loss_hours", 48)
-                expire_underperform_hours = trading_cfg.get("expire_underperform_hours", 72)
-                expire_min_profit_pct = trading_cfg.get("expire_min_profit_pct", 500)
+                expire_no_profit_hours = trading_cfg.get("expire_no_profit_hours", 12)
+                expire_underperform_hours = trading_cfg.get("expire_underperform_hours", 24)
+                expire_min_profit_pct = trading_cfg.get("expire_min_profit_pct", 100)
                 expire_tag = ""
-                if hold_hours >= expire_loss_hours and profit_pct < 0:
-                    expire_tag = f" ⚠️超期{expire_loss_hours:.0f}h仍亏损"
+                if hold_hours >= expire_no_profit_hours and profit_pct <= 0:
+                    expire_tag = f" ⚠️超期{expire_no_profit_hours:.0f}h未盈利"
                 elif hold_hours >= expire_underperform_hours and profit_pct < expire_min_profit_pct:
                     expire_tag = f" ⚠️超期{expire_underperform_hours:.0f}h未达{expire_min_profit_pct:.0f}%"
                 log.info("  %s [%s]: 当前 $%.12f | 买入 $%.12f | 最高 $%.12f | 盈亏 %+.1f%% | 持仓 %.1f天(%.0fh)%s",
