@@ -514,6 +514,8 @@ K线同时记录 klineHigh/klineLow，用于精筛的过山车检测（振幅过
 ### 1. 安装依赖
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
 pip3 install -r requirements.txt
 ```
 
