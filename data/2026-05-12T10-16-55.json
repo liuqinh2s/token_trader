@@ -1,0 +1,1176 @@
+{
+  "scanTime": "2026-05-12 10:16:55",
+  "tokens": [],
+  "queue": [
+    {
+      "address": "0xee97d755243431b5fb9132c4e72b676e5e3d4444",
+      "creator": "0xf4493771676cfe9475b8dd9e2cd72d579ac92eb0",
+      "block": 97773491,
+      "source": "four.meme",
+      "name": "Mamboo",
+      "symbol": "小福瑞",
+      "createdAt": 1778531867000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 2,
+      "socialLinks": {
+        "twitter": "https://x.com/AweboBird/status/2053933699834482952",
+        "website": "https://www.instagram.com/ynwaruss888/"
+      },
+      "descr": "Mamboo",
+      "price": 1.034e-05,
+      "addedPrice": 1.0337236246361518e-05,
+      "peakPrice": 1.034e-05,
+      "holders": 76,
+      "addedHolders": 76,
+      "peakHolders": 76,
+      "liquidity": 0.0,
+      "peakLiquidity": 0.0,
+      "raisedAmount": 3.988415084524472,
+      "progress": 0.52737288,
+      "peakProgress": 0.52737288,
+      "addedProgress": 0.52737288,
+      "day1Vol": 0.0,
+      "consecDrops": 0,
+      "lastPrice": 1.034e-05,
+      "priceHistory": [
+        1.0337236246361518e-05,
+        1.034e-05
+      ],
+      "holdersHistory": [
+        76,
+        76
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0.0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "gtPoolAddress": "0xee97d755243431b5fb9132c4e72b676e5e3d4444:4meme",
+      "volume24h": 66340.21,
+      "volumeH1": 3072.07,
+      "buysH1": 34,
+      "sellsH1": 32,
+      "buysH24": 442,
+      "sellsH24": 354,
+      "priceChangeM5": -11.76,
+      "priceChangeH1": -33.45,
+      "priceChangeH6": 168.0,
+      "priceChangeH24": 168.0,
+      "boosts": 0,
+      "progressHistory": [
+        0.52737288
+      ],
+      "prevPrice": 1.0337236246361518e-05,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 1.034e-05,
+      "price_ratio": 1.0,
+      "peak_holders": 76,
+      "age_hours": 5.6522627747938365,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/AweboBird/status/2053933699834482952",
+        "website": "https://www.instagram.com/ynwaruss888/"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778531867000,
+      "ath": 1.034e-05,
+      "social_count": 2,
+      "total_supply": 1000000000,
+      "raised_amount": 3.988415084524472,
+      "market_cap": 0,
+      "price_change_h1": -33.45,
+      "price_change_h24": 168.0
+    },
+    {
+      "address": "0x65b1b702bf163bf8dcdcc62bd23d9b858b664444",
+      "creator": "0x147fc5ee41f3c98d46fe190098b4fc28b66d3018",
+      "block": 97773749,
+      "source": "four.meme",
+      "name": "Keyboard Cat",
+      "symbol": "KEYCAT",
+      "createdAt": 1778550907000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 2,
+      "socialLinks": {
+        "twitter": "https://x.com/thedevrrrrrrr/status/2054016014871114239",
+        "website": "https://www.gamestop.com/"
+      },
+      "descr": "Keyboard Cat",
+      "price": 3.811e-06,
+      "addedPrice": 4.70524824338416e-06,
+      "peakPrice": 4.70524824338416e-06,
+      "holders": 1,
+      "addedHolders": 1,
+      "peakHolders": 1,
+      "liquidity": 0.0,
+      "peakLiquidity": 0.0,
+      "raisedAmount": 0.6853680460471581,
+      "progress": 0.134323576,
+      "peakProgress": 0.134323576,
+      "addedProgress": 0.134323576,
+      "day1Vol": 0.0,
+      "consecDrops": 1,
+      "lastPrice": 3.811e-06,
+      "priceHistory": [
+        4.70524824338416e-06,
+        3.811e-06
+      ],
+      "holdersHistory": [
+        1,
+        1
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0.0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "gtPoolAddress": "0x65b1b702bf163bf8dcdcc62bd23d9b858b664444:4meme",
+      "volume24h": 1130.87,
+      "volumeH1": 1130.87,
+      "buysH1": 2,
+      "sellsH1": 3,
+      "buysH24": 2,
+      "sellsH24": 3,
+      "priceChangeM5": -19.01,
+      "priceChangeH1": -19.19,
+      "priceChangeH6": -19.19,
+      "priceChangeH24": -19.19,
+      "boosts": 0,
+      "progressHistory": [
+        0.134323576
+      ],
+      "prevPrice": 4.70524824338416e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 4.70524824338416e-06,
+      "price_ratio": 0.8099466389171873,
+      "peak_holders": 1,
+      "age_hours": 0.36337388746473526,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/thedevrrrrrrr/status/2054016014871114239",
+        "website": "https://www.gamestop.com/"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778550907000,
+      "ath": 4.70524824338416e-06,
+      "social_count": 2,
+      "total_supply": 1000000000,
+      "raised_amount": 0.6853680460471581,
+      "market_cap": 0,
+      "price_change_h1": -19.19,
+      "price_change_h24": -19.19
+    },
+    {
+      "address": "0xf8bee58beb742a0c3e1906eccbb072626d687777",
+      "creator": "0x07a3fdbfd8cfe59e2d8a01f197e942ceaaf06666",
+      "block": 97773490,
+      "source": "flap",
+      "name": "Diamond Balls",
+      "symbol": "DBALLS",
+      "createdAt": 1778552079000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/#0xf8bee58beb742A0C3E1906ecCBb072626d687777",
+        "telegram": "https://t.me/#0xf8bee58beb742A0C3E1906ecCBb072626d687777",
+        "website": "https://dballs.bolt.host"
+      },
+      "descr": "",
+      "price": 3.68232664103312e-06,
+      "addedPrice": 3.68232664103312e-06,
+      "peakPrice": 3.68232664103312e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.600337940068e-06,
+      "progress": 1.000330951182511e-07,
+      "peakProgress": 1.000330951182511e-07,
+      "addedProgress": 1.000330951182511e-07,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232664103312e-06,
+      "priceHistory": [
+        3.68232664103312e-06,
+        3.68232664103312e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        1.000330951182511e-07
+      ],
+      "prevPrice": 3.68232664103312e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.68232664103312e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.03781833306206597,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/#0xf8bee58beb742A0C3E1906ecCBb072626d687777",
+        "telegram": "https://t.me/#0xf8bee58beb742A0C3E1906ecCBb072626d687777",
+        "website": "https://dballs.bolt.host"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552079000,
+      "ath": 3.68232664103312e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 1.600337940068e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x00d3df3a0fbd6f019ea0b90d9ff60adb052b7777",
+      "creator": "0xab1335b9a483d7071bb7400872a6db2084126666",
+      "block": 97773506,
+      "source": "flap",
+      "name": "疯狂无限传播+销毁+分红",
+      "symbol": "疯狂病毒",
+      "createdAt": 1778552086000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 2,
+      "socialLinks": {
+        "twitter": "https://x.com/fengkuangbingdu/status/2054021805976027501?s=20",
+        "telegram": "https://t.me/fengkuangbingdu"
+      },
+      "descr": "疯狂病毒的每一次交易，都是一次完整的传播闭环：\n买入触发感染税 → 税金按比例分配 → 销毁推高稀缺性，分红奖励持有者，资金钱包助力扩张 → 更多玩家被分红和通缩吸引入场 → 交易规模扩大，税金池滚雪球式增长 → 代币通缩加速，分红收益暴涨，形成病毒级的正向飞轮。\n \n在这里，交易不是终点，而是病毒传播的起点；持币不是持有风险，而是持有收益。每一枚代币都是一枚可传播的病毒样本，每一次交易都是一次裂变，每一个持有者都是病毒的传播节点。",
+      "price": 3.68232612848688e-06,
+      "addedPrice": 3.68232612848688e-06,
+      "peakPrice": 3.68232612848688e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.172745155651e-06,
+      "progress": 7.330534680676253e-08,
+      "peakProgress": 7.330534680676253e-08,
+      "addedProgress": 7.330534680676253e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232612848688e-06,
+      "priceHistory": [
+        3.68232612848688e-06,
+        3.68232612848688e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        7.330534680676253e-08
+      ],
+      "prevPrice": 3.68232612848688e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": 1,
+      "_social_quality_good": false,
+      "max_price": 3.68232612848688e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.03587388963487413,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/fengkuangbingdu/status/2054021805976027501?s=20",
+        "telegram": "https://t.me/fengkuangbingdu"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552086000,
+      "ath": 3.68232612848688e-06,
+      "social_count": 2,
+      "total_supply": 1000000000,
+      "raised_amount": 1.172745155651e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x789ad58da0d91f553183f03926900ce7e4217777",
+      "creator": "0x2ce467f3b1b9b9b60facd701f6313bb2e9a56666",
+      "block": 97773532,
+      "source": "flap",
+      "name": "Financial Super App",
+      "symbol": "FSA",
+      "createdAt": 1778552098000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/#0x789ad58DA0d91F553183F03926900CE7E4217777",
+        "telegram": "https://t.me/#0x789ad58DA0d91F553183F03926900CE7E4217777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x789ad58DA0d91F553183F03926900CE7E4217777"
+      },
+      "descr": "",
+      "price": 3.6823270918347997e-06,
+      "addedPrice": 3.6823270918347997e-06,
+      "peakPrice": 3.6823270918347997e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.976124425968e-06,
+      "progress": 1.2352256215331417e-07,
+      "peakProgress": 1.2352256215331417e-07,
+      "addedProgress": 1.2352256215331417e-07,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823270918347997e-06,
+      "priceHistory": [
+        3.6823270918347997e-06,
+        3.6823270918347997e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        1.2352256215331417e-07
+      ],
+      "prevPrice": 3.6823270918347997e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823270918347997e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.03254055704752604,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/#0x789ad58DA0d91F553183F03926900CE7E4217777",
+        "telegram": "https://t.me/#0x789ad58DA0d91F553183F03926900CE7E4217777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x789ad58DA0d91F553183F03926900CE7E4217777"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552098000,
+      "ath": 3.6823270918347997e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 1.976124425968e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x4f36262e62143a6c57d3b3b252d636e9cc0b7777",
+      "creator": "0x90497450f2a706f1951b5bdda52b4e5d16f34c06",
+      "block": 97773567,
+      "source": "flap",
+      "name": "Iran Strategic Oil Reserve",
+      "symbol": "ISOR",
+      "createdAt": 1778552114000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 0,
+      "socialLinks": {},
+      "descr": "",
+      "price": 3.6823247216403998e-06,
+      "addedPrice": 3.6823247216403998e-06,
+      "peakPrice": 3.6823247216403998e-06,
+      "holders": 1,
+      "addedHolders": 0,
+      "peakHolders": 1,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 0.0,
+      "progress": 0.0,
+      "peakProgress": 0.0,
+      "addedProgress": 0.0,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823247216403998e-06,
+      "priceHistory": [
+        3.6823247216403998e-06,
+        3.6823247216403998e-06
+      ],
+      "holdersHistory": [
+        0,
+        1
+      ],
+      "_socialPendingRounds": 1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        0.0
+      ],
+      "prevPrice": 3.6823247216403998e-06,
+      "copycat": {
+        "count": 1,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823247216403998e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 1,
+      "age_hours": 0.02809611328125,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {},
+      "is_copycat": false,
+      "copycat_count": 1,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552114000,
+      "ath": 3.6823247216403998e-06,
+      "social_count": 0,
+      "total_supply": 1000000000,
+      "raised_amount": 0.0,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x5a0cf1b213a4cebaa3a708c463df31d329367777",
+      "creator": "0xf153e2f03c8a949414066c2e3ef44b2fa84b6666",
+      "block": 97773575,
+      "source": "flap",
+      "name": "Iran Strategic Oil Reserve",
+      "symbol": "ISOR",
+      "createdAt": 1778552117000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 0,
+      "socialLinks": {},
+      "descr": "",
+      "price": 3.68232606674232e-06,
+      "addedPrice": 3.68232606674232e-06,
+      "peakPrice": 3.68232606674232e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.121389458742e-06,
+      "progress": 7.009523150227641e-08,
+      "peakProgress": 7.009523150227641e-08,
+      "addedProgress": 7.009523150227641e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232606674232e-06,
+      "priceHistory": [
+        3.68232606674232e-06,
+        3.68232606674232e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": 1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        7.009523150227641e-08
+      ],
+      "prevPrice": 3.68232606674232e-06,
+      "copycat": {
+        "count": 1,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.68232606674232e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.02726278089735243,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {},
+      "is_copycat": false,
+      "copycat_count": 1,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552117000,
+      "ath": 3.68232606674232e-06,
+      "social_count": 0,
+      "total_supply": 1000000000,
+      "raised_amount": 1.121389458742e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0xc361c0f7bdf87b431f071436ac43a2e398d77777",
+      "creator": "0xae74761a3a8182de350067e8af52de38300d6666",
+      "block": 97773599,
+      "source": "flap",
+      "name": "唐三藏",
+      "symbol": "唐三藏",
+      "createdAt": 1778552128000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/#0xc361C0f7BDf87b431f071436ac43a2e398D77777",
+        "telegram": "https://t.me/#0xc361C0f7BDf87b431f071436ac43a2e398D77777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0xc361C0f7BDf87b431f071436ac43a2e398D77777"
+      },
+      "descr": "",
+      "price": 3.6823258383538398e-06,
+      "addedPrice": 3.6823258383538398e-06,
+      "peakPrice": 3.6823258383538398e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 9.3126677142e-07,
+      "progress": 5.821114103060327e-08,
+      "peakProgress": 5.821114103060327e-08,
+      "addedProgress": 5.821114103060327e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823258383538398e-06,
+      "priceHistory": [
+        3.6823258383538398e-06,
+        3.6823258383538398e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        5.821114103060327e-08
+      ],
+      "prevPrice": 3.6823258383538398e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823258383538398e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.02420722595214844,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/#0xc361C0f7BDf87b431f071436ac43a2e398D77777",
+        "telegram": "https://t.me/#0xc361C0f7BDf87b431f071436ac43a2e398D77777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0xc361C0f7BDf87b431f071436ac43a2e398D77777"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552128000,
+      "ath": 3.6823258383538398e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 9.3126677142e-07,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x6f3dc4bd11847c601b0b3ee5a1209ea8c76e7777",
+      "creator": "0xd50c883864e547b10929111753042af0fdcc6666",
+      "block": 97773665,
+      "source": "flap",
+      "name": "马嘉祺",
+      "symbol": "马嘉祺",
+      "createdAt": 1778552158000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/#0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777",
+        "telegram": "https://t.me/#0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777"
+      },
+      "descr": "",
+      "price": 3.6823258323785598e-06,
+      "addedPrice": 3.6823258323785598e-06,
+      "peakPrice": 3.6823258323785598e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 9.26216655773e-07,
+      "progress": 5.7895471017272806e-08,
+      "peakProgress": 5.7895471017272806e-08,
+      "addedProgress": 5.7895471017272806e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823258323785598e-06,
+      "priceHistory": [
+        3.6823258323785598e-06,
+        3.6823258323785598e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        5.7895471017272806e-08
+      ],
+      "prevPrice": 3.6823258323785598e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823258323785598e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.01587389322916667,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/#0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777",
+        "telegram": "https://t.me/#0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x6F3dc4Bd11847C601B0b3eE5A1209EA8c76E7777"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552158000,
+      "ath": 3.6823258323785598e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 9.26216655773e-07,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x0bd96189efe4aee9a0f59b77e68a234fb5957777",
+      "creator": "0x86268c712d63aa2115f763d487af8567087d38c3",
+      "block": 97773671,
+      "source": "flap",
+      "name": "Liftoff",
+      "symbol": "LIFTOFF",
+      "createdAt": 1778552160000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 1,
+      "socialLinks": {
+        "twitter": "https://x.com/SpaceX/status/2054022547382129060"
+      },
+      "descr": "-",
+      "price": 3.68232662177944e-06,
+      "addedPrice": 3.68232662177944e-06,
+      "peakPrice": 3.68232662177944e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.5842e-06,
+      "progress": 9.902435311856678e-08,
+      "peakProgress": 9.902435311856678e-08,
+      "addedProgress": 9.902435311856678e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232662177944e-06,
+      "priceHistory": [
+        3.68232662177944e-06,
+        3.68232662177944e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        9.902435311856678e-08
+      ],
+      "prevPrice": 3.68232662177944e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.68232662177944e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.015318338283962674,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/SpaceX/status/2054022547382129060"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552160000,
+      "ath": 3.68232662177944e-06,
+      "social_count": 1,
+      "total_supply": 1000000000,
+      "raised_amount": 1.5842e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x075b9e31de69c3c73447ec592c1e686ccd7d7777",
+      "creator": "0xfcc0c42d028bbcc4f3054172d76a510f1e257be4",
+      "block": 97773727,
+      "source": "flap",
+      "name": "CoinMarketCap 20 Index DTF",
+      "symbol": "CMC20",
+      "createdAt": 1778552186000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 0,
+      "socialLinks": {},
+      "descr": "",
+      "price": 3.6823275506035195e-06,
+      "addedPrice": 3.6823275506035195e-06,
+      "peakPrice": 3.6823275506035195e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 2.3585e-06,
+      "progress": 1.474238964967427e-07,
+      "peakProgress": 1.474238964967427e-07,
+      "addedProgress": 1.474238964967427e-07,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823275506035195e-06,
+      "priceHistory": [
+        3.6823275506035195e-06,
+        3.6823275506035195e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": 1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        1.474238964967427e-07
+      ],
+      "prevPrice": 3.6823275506035195e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823275506035195e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.008096116672092014,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {},
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552186000,
+      "ath": 3.6823275506035195e-06,
+      "social_count": 0,
+      "total_supply": 1000000000,
+      "raised_amount": 2.3585e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0xa942d11ef081da1ec0a87dbbc22fb8d0ce3f7777",
+      "creator": "0x138449dc8d05e3e2d5e9065742082d85f7c16666",
+      "block": 97773728,
+      "source": "flap",
+      "name": "S.C.A.L.M",
+      "symbol": "scalm",
+      "createdAt": 1778552186000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/Hugodixon/status/2054020175750721629",
+        "telegram": "https://t.me/#0xA942d11EF081DA1eC0a87DbBc22FB8d0CE3f7777",
+        "website": "https://scalm.org"
+      },
+      "descr": "",
+      "price": 3.6823261132167198e-06,
+      "addedPrice": 3.6823261132167198e-06,
+      "peakPrice": 3.6823261132167198e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.160163100806e-06,
+      "progress": 7.25188742389501e-08,
+      "peakProgress": 7.25188742389501e-08,
+      "addedProgress": 7.25188742389501e-08,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.6823261132167198e-06,
+      "priceHistory": [
+        3.6823261132167198e-06,
+        3.6823261132167198e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        7.25188742389501e-08
+      ],
+      "prevPrice": 3.6823261132167198e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.6823261132167198e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.008096117146809896,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/Hugodixon/status/2054020175750721629",
+        "telegram": "https://t.me/#0xA942d11EF081DA1eC0a87DbBc22FB8d0CE3f7777",
+        "website": "https://scalm.org"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552186000,
+      "ath": 3.6823261132167198e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 1.160163100806e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x8164013fd0579f67c56447cc96acc5f61e4e7777",
+      "creator": "0x7b6648e4d3e0562e6cb64be5125f8a3fee906666",
+      "block": 97773735,
+      "source": "flap",
+      "name": "来根华子",
+      "symbol": "来根华子",
+      "createdAt": 1778552189000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 3,
+      "socialLinks": {
+        "twitter": "https://x.com/#0x8164013fD0579F67c56447Cc96acc5F61E4E7777",
+        "telegram": "https://t.me/#0x8164013fD0579F67c56447Cc96acc5F61E4E7777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x8164013fD0579F67c56447Cc96acc5F61E4E7777"
+      },
+      "descr": "",
+      "price": 3.68232704868e-06,
+      "addedPrice": 3.68232704868e-06,
+      "peakPrice": 3.68232704868e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 1.940029858385e-06,
+      "progress": 1.2126638161676514e-07,
+      "peakProgress": 1.2126638161676514e-07,
+      "addedProgress": 1.2126638161676514e-07,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232704868e-06,
+      "priceHistory": [
+        3.68232704868e-06,
+        3.68232704868e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": -1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        1.2126638161676514e-07
+      ],
+      "prevPrice": 3.68232704868e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.68232704868e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.0072627845594618054,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {
+        "twitter": "https://x.com/#0x8164013fD0579F67c56447Cc96acc5F61E4E7777",
+        "telegram": "https://t.me/#0x8164013fD0579F67c56447Cc96acc5F61E4E7777",
+        "website": "https://dex.coinmarketcap.com/token/bsc/0x8164013fD0579F67c56447Cc96acc5F61E4E7777"
+      },
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552189000,
+      "ath": 3.68232704868e-06,
+      "social_count": 3,
+      "total_supply": 1000000000,
+      "raised_amount": 1.940029858385e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    },
+    {
+      "address": "0x04a8509c70d769a01b3cd694e8f674348a367777",
+      "creator": "0xc7faeacc08f80e87fe2668bfd3b9d5fd9cf75898",
+      "block": 97773757,
+      "source": "flap",
+      "name": "牛回！",
+      "symbol": "牛回！",
+      "createdAt": 1778552199000,
+      "addedAt": 1778552210787,
+      "totalSupply": 1000000000,
+      "socialCount": 0,
+      "socialLinks": {},
+      "descr": "",
+      "price": 3.68232776372184e-06,
+      "addedPrice": 3.68232776372184e-06,
+      "peakPrice": 3.68232776372184e-06,
+      "holders": 2,
+      "addedHolders": 0,
+      "peakHolders": 2,
+      "liquidity": 0,
+      "peakLiquidity": 0,
+      "raisedAmount": 2.5365e-06,
+      "progress": 1.5855022830781763e-07,
+      "peakProgress": 1.5855022830781763e-07,
+      "addedProgress": 1.5855022830781763e-07,
+      "day1Vol": 0,
+      "consecDrops": 0,
+      "lastPrice": 3.68232776372184e-06,
+      "priceHistory": [
+        3.68232776372184e-06,
+        3.68232776372184e-06
+      ],
+      "holdersHistory": [
+        0,
+        2
+      ],
+      "_socialPendingRounds": 1,
+      "liquidityHistory": [
+        0
+      ],
+      "volumeHistory": [
+        0
+      ],
+      "progressHistory": [
+        1.5855022830781763e-07
+      ],
+      "prevPrice": 3.68232776372184e-06,
+      "copycat": {
+        "count": 0,
+        "isCopycat": false
+      },
+      "_tw_followers": null,
+      "_tg_members": null,
+      "_social_quality_good": false,
+      "max_price": 3.68232776372184e-06,
+      "price_ratio": 1.0,
+      "peak_holders": 2,
+      "age_hours": 0.0044850074598524305,
+      "bonus_tags": [],
+      "bonus_score": 0,
+      "social_links": {},
+      "is_copycat": false,
+      "copycat_count": 0,
+      "wallet_signals": [],
+      "is_quality_developer": false,
+      "reason": "",
+      "created_at": 1778552199000,
+      "ath": 3.68232776372184e-06,
+      "social_count": 0,
+      "total_supply": 1000000000,
+      "raised_amount": 2.5365e-06,
+      "market_cap": 0,
+      "price_change_h1": 0,
+      "price_change_h24": 0,
+      "boosts": 0
+    }
+  ],
+  "eliminatedThisRound": [],
+  "rejectedAtEntry": [],
+  "lastBlock": 97773781,
+  "lastScanTime": 1778552210787,
+  "scanRound": 1,
+  "marketSentiment": 0,
+  "totalTokens": 14,
+  "filteredTokens": 0,
+  "newDiscovered": 16,
+  "newAdmitted": 14,
+  "eliminatedCount": 0,
+  "eliminatedTotal48h": 0,
+  "queueSize": 14,
+  "breakthroughTokens": []
+}
