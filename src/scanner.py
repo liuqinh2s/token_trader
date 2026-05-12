@@ -2778,18 +2778,21 @@ def merge_price_data(ds_data: dict[str, dict], gt_data: dict[str, dict]) -> dict
 # ===================================================================
 #  GeckoTerminal API (备选K线, ~30 req/min)
 # ===================================================================
-def _gt_request(url: str, max_retries: int = 3) -> dict | None:
+def _gt_request(url: str, max_retries: int = 5) -> dict | None:
     global _gt_rate_delay
     _ensure_sessions()
     for attempt in range(max_retries):
         try:
             r = _gt_session.get(url, timeout=15)
             if r.status_code == 429:
-                wait = 5 * (attempt + 1)
-                _gt_rate_delay = min(5.0, _gt_rate_delay + 1.0)
+                wait = 10 * (attempt + 1)  # 增加等待时间
+                _gt_rate_delay = min(10.0, _gt_rate_delay + 2.0)
                 log.warning("GT 429, 等待 %ds (%d/%d)", wait, attempt + 1, max_retries)
                 time.sleep(wait)
                 continue
+            if r.status_code == 404:
+                log.debug("GT 404 未找到 [%s]", url[-60:])
+                return None
             if r.status_code != 200:
                 log.debug("GT 请求返回非200状态码: %d - %s (%d/%d)", 
                           r.status_code, url[-60:], attempt + 1, max_retries)
@@ -3003,21 +3006,21 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
                    query_addr, len(query_addr), token_address)
         query_addr = token_address
     
-    if not gt_pool_addr:
-        log.debug("K线查询: gtPoolAddress 为空, 使用代币地址 [%s]", token_address[:16])
-    
-    # 48 小时 = 48 * 4 = 192 根 15 分钟 K 线
-    candles = gt_ohlcv_15min(query_addr, limit=192)
-    
-    # 如果第一次查询失败且没有使用 GT pool 地址，尝试从 GT 获取 pool 地址并重试
-    if (not candles or len(candles) == 0) and not gt_pool_addr:
-        log.debug("K线查询失败, 尝试从 GT 获取 pool 地址 [%s]", token_address[:16])
+    # 如果 DexScreener 返回的 pool 地址无效，优先从 GeckoTerminal 获取
+    if not gt_pool_addr or len(gt_pool_addr) != 42 or not gt_pool_addr.startswith("0x"):
+        log.debug("gtPoolAddress 无效或为空 [%s], 从 GT 获取 pool 地址", token_address[:16])
         gt_pool_from_api = gt_get_pool_address(token_address)
-        if gt_pool_from_api:
+        if gt_pool_from_api and len(gt_pool_from_api) == 42 and gt_pool_from_api.startswith("0x"):
             log.debug("GT 获取到 pool 地址: %s", gt_pool_from_api[:16])
             query_addr = gt_pool_from_api
             used_pool_addr = gt_pool_from_api
-            candles = gt_ohlcv_15min(query_addr, limit=192)
+        else:
+            log.debug("GT 无法获取 pool 地址, 使用代币地址 [%s]", token_address[:16])
+            query_addr = token_address
+            used_pool_addr = None
+    
+    # 48 小时 = 48 * 4 = 192 根 15 分钟 K 线
+    candles = gt_ohlcv_15min(query_addr, limit=192)
     
     if not candles or len(candles) == 0:
         log.info("K线查询失败: [%s] 无数据 (query_addr=%s, pool_addr=%s)", 
