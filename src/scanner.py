@@ -5093,6 +5093,8 @@ def scan_once(cfg: dict) -> dict:
                     holders = 0
                     token_detail = t.copy()
                     token_detail.update({
+                        "name": ds.get("name") or t.get("name", ""),
+                        "shortName": ds.get("symbol") or t.get("symbol", ""),
                         "price": price,
                         "progress": progress,
                         "totalSupply": real_supply,
@@ -5102,7 +5104,10 @@ def scan_once(cfg: dict) -> dict:
                     })
                 else:
                     detail = detail_map.get(t["address"])
-                    if not detail or detail["totalSupply"] != TOTAL_SUPPLY:
+                    if not detail:
+                        log.warning("第一轮买入跳过: detail 获取失败 %s", t["address"][:16])
+                        continue
+                    if detail["totalSupply"] != TOTAL_SUPPLY:
                         continue
                     price = detail["price"]
                     progress = detail.get("progress", 0)
@@ -5110,10 +5115,20 @@ def scan_once(cfg: dict) -> dict:
                     social_count = detail.get("socialCount", 0)
                     holders = detail.get("holders", 0)
                     token_detail = detail
+                    # 用 detail 的 launchTime 修正 createdAt (four.meme detail 包含精确创建时间)
+                    if detail.get("launchTime", 0) > 0:
+                        t["createdAt"] = detail["launchTime"]
                 
                 # 4. 检查价格和币龄条件
+                # 注意: createdAt 可能是秒级或毫秒级，需要统一处理
                 created_at = t.get("createdAt", 0)
-                age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else 999
+                # 如果 createdAt < 1亿，说明是秒级时间戳，转为毫秒
+                if 0 < created_at < 100000000000:
+                    created_at_ms = created_at * 1000
+                else:
+                    created_at_ms = created_at
+                age_hours = (now_ms - created_at_ms) / 3600000 if created_at_ms > 0 else 999
+                
                 if FIRST_ROUND_MIN_PRICE <= price <= FIRST_ROUND_MAX_PRICE and age_hours < FIRST_ROUND_MAX_AGE_HOURS:
                     first_round_candidates.append({
                         "token": t,
