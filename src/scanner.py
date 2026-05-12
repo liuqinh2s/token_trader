@@ -2775,6 +2775,39 @@ def merge_price_data(ds_data: dict[str, dict], gt_data: dict[str, dict]) -> dict
     return result
 
 
+def _normalize_address(raw_addr: str) -> str | None:
+    """
+    规范化 BSC 地址
+    处理以下异常格式：
+    1. "0x1234...:4meme" -> "0x1234..."
+    2. "0x1234..." (48字符，带有额外的来源标识)
+    3. "05d4ca4aae3063bf4a0674444" (缺少0x前缀)
+    返回标准 42 字符 BSC 地址或 None
+    """
+    if not raw_addr:
+        return None
+    
+    # 如果包含冒号，只取冒号前的部分
+    if ":" in raw_addr:
+        raw_addr = raw_addr.split(":")[0]
+    
+    # 确保有 0x 前缀
+    if not raw_addr.startswith("0x"):
+        raw_addr = "0x" + raw_addr
+    
+    # 验证长度
+    if len(raw_addr) == 42 and raw_addr.startswith("0x"):
+        return raw_addr.lower()
+    
+    # 如果长度不对，尝试提取有效的 40 位十六进制字符
+    import re
+    match = re.search(r'0x[a-fA-F0-9]{40}', raw_addr)
+    if match:
+        return match.group(0).lower()
+    
+    return None
+
+
 # ===================================================================
 #  GeckoTerminal API (备选K线, ~30 req/min)
 # ===================================================================
@@ -2995,28 +3028,28 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     query_addr = gt_pool_addr or token_address
     used_pool_addr = gt_pool_addr
     
-    # 修复地址格式异常（如包含来源标识）
-    if ":" in query_addr:
-        log.warning("K线查询地址格式异常(含来源标识): query_addr=%s, token_address=%s", query_addr, token_address)
-        query_addr = query_addr.split(":")[0]
-    
-    # 校验地址长度：BSC地址应为42字符（0x + 40位十六进制）
-    if len(query_addr) != 42 or not query_addr.startswith("0x"):
-        log.warning("K线查询地址长度异常: query_addr=%s (长度=%d), 使用代币地址 %s", 
-                   query_addr, len(query_addr), token_address)
-        query_addr = token_address
+    # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
+    query_addr = _normalize_address(query_addr) or token_address
+    if query_addr != (gt_pool_addr or token_address):
+        log.warning("K线查询地址被规范化: %s -> %s", gt_pool_addr or token_address, query_addr)
     
     # 如果 DexScreener 返回的 pool 地址无效，优先从 GeckoTerminal 获取
-    if not gt_pool_addr or len(gt_pool_addr) != 42 or not gt_pool_addr.startswith("0x"):
+    if not gt_pool_addr or not _normalize_address(gt_pool_addr):
         log.debug("gtPoolAddress 无效或为空 [%s], 从 GT 获取 pool 地址", token_address[:16])
         gt_pool_from_api = gt_get_pool_address(token_address)
-        if gt_pool_from_api and len(gt_pool_from_api) == 42 and gt_pool_from_api.startswith("0x"):
-            log.debug("GT 获取到 pool 地址: %s", gt_pool_from_api[:16])
-            query_addr = gt_pool_from_api
-            used_pool_addr = gt_pool_from_api
+        if gt_pool_from_api:
+            normalized = _normalize_address(gt_pool_from_api)
+            if normalized:
+                log.debug("GT 获取到 pool 地址: %s", normalized[:16])
+                query_addr = normalized
+                used_pool_addr = normalized
+            else:
+                log.warning("GT 返回的 pool 地址无法规范化: %s", gt_pool_from_api)
+                query_addr = _normalize_address(token_address) or token_address
+                used_pool_addr = None
         else:
             log.debug("GT 无法获取 pool 地址, 使用代币地址 [%s]", token_address[:16])
-            query_addr = token_address
+            query_addr = _normalize_address(token_address) or token_address
             used_pool_addr = None
     
     # 48 小时 = 48 * 4 = 192 根 15 分钟 K 线
@@ -3169,16 +3202,18 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
         pool_addr = t.get("gtPoolAddress") or token_addr
         limit = 4 if t.get("klineFixed") else 24
         
-        # 修复地址格式异常（如包含来源标识）
-        if ":" in pool_addr:
-            log.warning("K线查询地址格式异常(含来源标识): pool_addr=%s, token_addr=%s", pool_addr, token_addr)
-            pool_addr = pool_addr.split(":")[0]
-        
-        # 校验地址长度：BSC地址应为42字符（0x + 40位十六进制）
-        if len(pool_addr) != 42 or not pool_addr.startswith("0x"):
-            log.warning("K线查询地址长度异常: pool_addr=%s (长度=%d), 使用代币地址 %s", 
-                       pool_addr, len(pool_addr), token_addr)
-            pool_addr = token_addr
+        # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
+        normalized_addr = _normalize_address(pool_addr)
+        if normalized_addr:
+            pool_addr = normalized_addr
+        else:
+            normalized_addr = _normalize_address(token_addr)
+            if normalized_addr:
+                pool_addr = normalized_addr
+                log.warning("K线查询: pool地址无效，使用代币地址 %s", pool_addr[:16])
+            else:
+                log.warning("K线查询: 代币地址也无法规范化 [%s]", token_addr[:16])
+                return token_addr, None
         
         _rate_wait()
         try:
@@ -3840,10 +3875,11 @@ def elimination_check(queue: list[dict], now_ms: int,
             t["symbol"] = ds.get("symbol") or t.get("symbol", "")
             # 记录 GT 池子地址 (用于 GT K线查询, 部分代币 tokenAddress ≠ poolAddress)
             ds_pool = ds.get("pairAddress", "")
-            if ds_pool and len(ds_pool) == 42 and ds_pool.startswith("0x"):
-                t["gtPoolAddress"] = ds_pool
+            normalized_pool = _normalize_address(ds_pool)
+            if normalized_pool:
+                t["gtPoolAddress"] = normalized_pool
             elif ds_pool:
-                log.warning("DexScreener 返回的 pairAddress 格式异常: %s (长度=%d)", ds_pool, len(ds_pool))
+                log.warning("DexScreener 返回的 pairAddress 无法规范化: %s (长度=%d)", ds_pool, len(ds_pool))
             # 更新交易量和买卖笔数 (DexScreener)
             t["volume24h"] = ds.get("volume24h", 0)
             t["volumeH1"] = ds.get("volumeH1", 0)
