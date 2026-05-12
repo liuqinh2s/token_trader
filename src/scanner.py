@@ -70,9 +70,7 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
        - 15%~30% 区间: 回撤 15% 止盈
        - 30% 以上: 中点止盈法 (价格 ≤ (最高价 + 买入价) / 2 时卖出)
     2. 固定止损: 亏损 25% 止损
-    3. 超期清仓:
-       - 持仓超过 12h 且未盈利 → 卖出
-       - 持仓超过 24h 盈利不足 100% → 卖出
+    3. 超期清仓: 持仓超过 24h 且亏损 → 卖出
 """
 
 from __future__ import annotations
@@ -2994,6 +2992,10 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     query_addr = gt_pool_addr or token_address
     used_pool_addr = gt_pool_addr
     
+    if ":" in query_addr:
+        log.warning("K线查询地址格式异常: query_addr=%s, token_address=%s", query_addr, token_address)
+        query_addr = query_addr.split(":")[0]
+    
     if not gt_pool_addr:
         log.debug("K线查询: gtPoolAddress 为空, 使用代币地址 [%s]", token_address[:16])
     
@@ -3156,6 +3158,11 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
         token_addr = t["address"]
         pool_addr = t.get("gtPoolAddress") or token_addr
         limit = 4 if t.get("klineFixed") else 24
+        
+        if ":" in pool_addr:
+            log.warning("K线查询地址格式异常: pool_addr=%s, token_addr=%s", pool_addr, token_addr)
+            pool_addr = pool_addr.split(":")[0]
+        
         _rate_wait()
         try:
             candles = gt_ohlcv_15min(pool_addr, limit=limit)
@@ -5461,7 +5468,6 @@ def scan_once(cfg: dict) -> dict:
     trading_enabled = _HAS_TRADER and cfg.get("trading", {}).get("enabled", False)
     if trading_enabled:
         bnb_usd = ticker.get("BNB", 600.0)
-        
         to_buy = []
         for item in filtered:
             token_data = {
@@ -5485,7 +5491,6 @@ def scan_once(cfg: dict) -> dict:
                      token_data["shortName"] or token_data["name"],
                      token_data["source"], detail_data["_bonus_score"], bonus_str)
             to_buy.append((token_data, detail_data))
-        
         log.info("自动买入: 准备买入 %d 个代币", len(to_buy))
         try:
             skipped = execute_buys(to_buy, cfg, bnb_usd)
