@@ -5008,6 +5008,130 @@ def scan_once(cfg: dict) -> dict:
     log.info("\n--- Step 1: 链上发现 ---")
     new_on_chain, latest_block = discover_on_chain(queue_state.get("lastBlock", 0))
 
+    # ===================================================================
+    # 第一轮买入策略 — 独立处理，不受入场条件限制
+    # 只保留必要筛选：代币黑名单、开发者黑名单、蹭名币、总供应量10亿
+    # ===================================================================
+    first_round_buy = None
+    if new_on_chain:
+        # 1. 应用必要的基础筛选
+        first_round_tokens = []
+        for t in new_on_chain:
+            # 筛选：代币黑名单
+            if t["address"].lower() in TOKEN_BLACKLIST:
+                continue
+            # 筛选：开发者黑名单
+            t_creator = (t.get("creator") or "").lower()
+            if t_creator and t_creator in DEPLOYER_BLACKLIST:
+                continue
+            # 筛选：蹭名币黑名单
+            t_symbol = (t.get("symbol") or "").strip().lower()
+            t_name = (t.get("name") or "").strip().lower()
+            if t_symbol in FAKE_NAME_BLACKLIST or t_name in FAKE_NAME_BLACKLIST:
+                continue
+            first_round_tokens.append(t)
+        
+        if first_round_tokens:
+            # 2. 获取 detail 数据
+            fm_tokens = [t for t in first_round_tokens if t.get("source") != "flap"]
+            flap_tokens = [t for t in first_round_tokens if t.get("source") == "flap"]
+            
+            detail_map = {}
+            if fm_tokens:
+                def _query_detail(addr: str) -> tuple[str, dict | None]:
+                    d = fm_detail(addr)
+                    if d is None:
+                        time.sleep(0.5)
+                        d = fm_detail(addr)
+                    return addr, d
+                with ThreadPoolExecutor(max_workers=5) as pool:
+                    futures = [pool.submit(_query_detail, t["address"]) for t in fm_tokens]
+                    for f in as_completed(futures):
+                        addr, detail = f.result()
+                        if detail:
+                            detail_map[addr] = detail
+            
+            flap_ds_data = {}
+            flap_states = {}
+            flap_supplies = {}
+            if flap_tokens:
+                flap_addrs = [t["address"] for t in flap_tokens]
+                flap_ds_data = ds_batch_prices(flap_addrs)
+                flap_states = flap_get_token_states(flap_addrs)
+                flap_supplies = erc20_total_supplies(flap_addrs)
+            
+            # 3. 筛选并构建候选列表
+            first_round_candidates = []
+            for t in first_round_tokens:
+                is_flap = t.get("source") == "flap"
+                token_detail = None
+                real_supply = None
+                progress = 0
+                price = 0
+                social_links = {}
+                social_count = 0
+                holders = 0
+                
+                if is_flap:
+                    ds = flap_ds_data.get(t["address"], {})
+                    flap_state = flap_states.get(t["address"], {})
+                    real_supply = flap_supplies.get(t["address"])
+                    if real_supply is None or real_supply != TOTAL_SUPPLY:
+                        continue
+                    flap_progress = flap_state.get("progress", 0)
+                    progress = 1.0 if flap_state.get("graduated", False) else flap_progress
+                    price = ds.get("price", 0)
+                    if not price and flap_state.get("price_native", 0) > 0:
+                        price = flap_price_to_usd(
+                            flap_state["price_native"],
+                            flap_state.get("quote_token", ZERO_ADDRESS),
+                        )
+                    social_links = {}
+                    social_count = 0
+                    holders = 0
+                    token_detail = t.copy()
+                    token_detail.update({
+                        "price": price,
+                        "progress": progress,
+                        "totalSupply": real_supply,
+                        "socialCount": social_count,
+                        "socialLinks": social_links,
+                        "holders": holders,
+                    })
+                else:
+                    detail = detail_map.get(t["address"])
+                    if not detail or detail["totalSupply"] != TOTAL_SUPPLY:
+                        continue
+                    price = detail["price"]
+                    progress = detail.get("progress", 0)
+                    social_links = detail.get("socialLinks", {})
+                    social_count = detail.get("socialCount", 0)
+                    holders = detail.get("holders", 0)
+                    token_detail = detail
+                
+                # 4. 检查价格和币龄条件
+                created_at = t.get("createdAt", 0)
+                age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else 999
+                if FIRST_ROUND_MIN_PRICE <= price <= FIRST_ROUND_MAX_PRICE and age_hours < FIRST_ROUND_MAX_AGE_HOURS:
+                    first_round_candidates.append({
+                        "token": t,
+                        "detail": token_detail,
+                        "progress": progress,
+                    })
+            
+            if first_round_candidates:
+                first_round_candidates.sort(key=lambda x: x["progress"], reverse=True)
+                first_round_buy = first_round_candidates[0]
+                token = first_round_buy["token"]
+                created_at = token.get("createdAt", 0)
+                age_minutes = (now_ms - created_at) / 60000 if created_at > 0 else 999
+                log.info("第一轮买入候选: %s [%s] 价格=%.7f 进度=%.1f%% 币龄=%.1fmin",
+                        token.get("name") or token.get("symbol") or token["address"][:16],
+                        token.get("source", "unknown"),
+                        first_round_buy["detail"].get("price", 0),
+                        first_round_buy["progress"] * 100,
+                        age_minutes)
+
     # Step 2: 入场筛
     log.info("\n--- Step 2: 入场筛 ---")
     admitted, rejected_at_entry = admission_filter(new_on_chain, existing_addrs)
@@ -5397,21 +5521,22 @@ def scan_once(cfg: dict) -> dict:
     first_round_for_frontend = None
     if first_round_buy:
         token = first_round_buy["token"]
+        detail = first_round_buy["detail"]
         addr = token.get("address", "")
         first_round_for_frontend = {
             "address": addr,
-            "name": token.get("name", ""),
-            "symbol": token.get("symbol", ""),
+            "name": detail.get("name") or token.get("name", ""),
+            "symbol": detail.get("shortName") or detail.get("symbol") or token.get("symbol", ""),
             "source": token.get("source", "four.meme"),
-            "price": token.get("price") or 0,
-            "holders": token.get("holders", 0) or 0,
+            "price": detail.get("price", 0),
+            "holders": detail.get("holders", 0),
             "progress": first_round_buy["progress"],
             "createdAt": token.get("createdAt", 0),
             "_is_first_round": True,  # 标识为第一轮买入代币
             "_bonus_tags": ["第一轮买入"],
             "_bonus_score": 100,
-            "socialLinks": token.get("socialLinks", {}) or {},
-            "socialCount": token.get("socialCount", 0) or 0,
+            "socialLinks": detail.get("socialLinks", {}),
+            "socialCount": detail.get("socialCount", 0),
         }
         # 添加到精筛结果前面
         quality_results_for_frontend = [first_round_for_frontend] + quality_results_for_frontend
@@ -5493,41 +5618,6 @@ def scan_once(cfg: dict) -> dict:
     trading_enabled = _HAS_TRADER and cfg.get("trading", {}).get("enabled", False)
     if trading_enabled:
         bnb_usd = ticker.get("BNB", 600.0)
-        
-        # ================================================================
-        # 第一轮买入策略 — v20 新增
-        # 条件: 价格 0.0000032~0.000004, 币龄 < 15 分钟, 按进度降序取第一个
-        # 每轮最多只买一个此类条件的代币
-        # 注意: 直接从链上发现的新代币筛选，不受入场条件限制
-        # ================================================================
-        first_round_candidates = []
-        now_ms = int(time.time() * 1000)
-        for token in new_on_chain:
-            price = token.get("price", 0) or 0
-            created_at = token.get("createdAt", 0)
-            age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else 999
-            
-            if (FIRST_ROUND_MIN_PRICE <= price <= FIRST_ROUND_MAX_PRICE 
-                    and age_hours < FIRST_ROUND_MAX_AGE_HOURS):
-                first_round_candidates.append({
-                    "token": token,
-                    "detail": token,  # 简化: 直接用 token 作为 detail
-                    "progress": token.get("progress", 0) or 0,
-                })
-        
-        if first_round_candidates:
-            # 按进度降序排序，取进度最高的第一个
-            first_round_candidates.sort(key=lambda x: x["progress"], reverse=True)
-            first_round_buy = first_round_candidates[0]
-            token = first_round_buy["token"]
-            created_at = token.get("createdAt", 0)
-            age_minutes = (int(time.time() * 1000) - created_at) / 60000 if created_at > 0 else 999
-            log.info("第一轮买入候选: %s [%s] 价格=%.7f 进度=%.1f%% 币龄=%.1fmin",
-                     token.get("name") or token.get("symbol") or token["address"][:16],
-                     token.get("source", "unknown"),
-                     token.get("price") or 0,
-                     first_round_buy["progress"] * 100,
-                     age_minutes)
         
         to_buy = []
         for item in filtered:
