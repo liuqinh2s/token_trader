@@ -3221,6 +3221,7 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
         # 如果 gtPoolAddress 为空或无效，先从 GT 获取 pool 地址
         if not pool_addr or not _normalize_address(pool_addr):
             log.debug("K线查询: gtPoolAddress 为空，从 GT 获取 pool 地址 [%s]", token_addr[:16])
+            _rate_wait()  # 获取 pool 地址前也需限流
             pool_addr = gt_get_pool_address(token_addr)
             if pool_addr:
                 log.debug("K线查询: GT 返回 pool 地址 [%s] -> [%s]", token_addr[:16], pool_addr[:16])
@@ -5263,6 +5264,10 @@ def scan_once(cfg: dict) -> dict:
                             t["sellsH1"] = gt_info.get("sellsH1", 0)
                         if t.get("volumeH1", 0) == 0 and gt_info.get("volumeH1", 0) != 0:
                             t["volumeH1"] = gt_info["volumeH1"]
+                        # 同步 gtPoolAddress (GT 返回的 pairAddress)
+                        gt_pool = gt_info.get("pairAddress", "")
+                        if gt_pool and not t.get("gtPoolAddress"):
+                            t["gtPoolAddress"] = gt_pool
                         # 同步到 survivors
                         for s in survivors:
                             if s["address"] == t["address"]:
@@ -5273,6 +5278,8 @@ def scan_once(cfg: dict) -> dict:
                                     s["sellsH1"] = gt_info.get("sellsH1", 0)
                                 if gt_info.get("volumeH1", 0) != 0:
                                     s["volumeH1"] = gt_info["volumeH1"]
+                                if gt_pool and not s.get("gtPoolAddress"):
+                                    s["gtPoolAddress"] = gt_pool
                                 break
 
     # 精筛代币K线修正: 仅对精筛通过的少量代币拉 GT K线
