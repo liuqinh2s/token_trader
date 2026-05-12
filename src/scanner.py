@@ -3215,8 +3215,18 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
 
     def _query_one(t: dict) -> tuple[str, dict | None]:
         token_addr = t["address"]
-        pool_addr = t.get("gtPoolAddress") or token_addr
+        pool_addr = t.get("gtPoolAddress")
         limit = 4 if t.get("klineFixed") else 24
+        
+        # 如果 gtPoolAddress 为空或无效，先从 GT 获取 pool 地址
+        if not pool_addr or not _normalize_address(pool_addr):
+            log.debug("K线查询: gtPoolAddress 为空，从 GT 获取 pool 地址 [%s]", token_addr[:16])
+            pool_addr = gt_get_pool_address(token_addr)
+            if pool_addr:
+                log.debug("K线查询: GT 返回 pool 地址 [%s] -> [%s]", token_addr[:16], pool_addr[:16])
+            else:
+                log.debug("K线查询: GT 未返回 pool 地址，使用代币地址 [%s]", token_addr[:16])
+                pool_addr = token_addr
         
         # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
         normalized_addr = _normalize_address(pool_addr)
@@ -4697,7 +4707,15 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
         # 特征 C: 1min K线头部脉冲 + 后续全是死线 = 拉盘后无人接盘
         if not exclude_reason:
             try:
-                kline_query_addr = t.get("gtPoolAddress") or addr
+                # 如果 gtPoolAddress 为空或无效，先从 GT 获取 pool 地址
+                kline_query_addr = t.get("gtPoolAddress")
+                if not kline_query_addr or not _normalize_address(kline_query_addr):
+                    log.debug("假K线检测: gtPoolAddress 为空，从 GT 获取 [%s]", addr[:16])
+                    kline_query_addr = gt_get_pool_address(addr)
+                    if kline_query_addr:
+                        log.debug("假K线检测: GT 返回 pool 地址 [%s] -> [%s]", addr[:16], kline_query_addr[:16])
+                    else:
+                        kline_query_addr = addr
                 candles_15m = gt_ohlcv_15min(kline_query_addr, limit=12)  # 最近 3 小时的 15min K线
                 candles_1m = gt_ohlcv_1min(kline_query_addr, limit=30)    # 最近 30 根 1min K线
                 fake_result = detect_fake_candles(candles_15m, candles_1m)
