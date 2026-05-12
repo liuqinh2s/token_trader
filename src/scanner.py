@@ -3215,9 +3215,20 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
 
     def _query_one(t: dict) -> tuple[str, dict | None]:
         token_addr = t["address"]
-        pool_addr = t.get("gtPoolAddress") or token_addr
+        pool_addr = t.get("gtPoolAddress")
         limit = 4 if t.get("klineFixed") else 24
-        
+
+        # 如果没有 gtPoolAddress，先从 GeckoTerminal 获取 pool 地址
+        if not pool_addr:
+            _rate_wait()
+            gt_pool = gt_get_pool_address(token_addr)
+            if gt_pool:
+                pool_addr = gt_pool
+                t["gtPoolAddress"] = gt_pool  # 缓存到 token dict，后续不再重复查询
+                log.debug("K线查询: GT 获取 pool 地址 %s -> %s", token_addr[:16], gt_pool[:16])
+            else:
+                pool_addr = token_addr  # 兜底：用代币地址当 pool 地址
+
         # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
         normalized_addr = _normalize_address(pool_addr)
         if normalized_addr:
@@ -4697,7 +4708,14 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
         # 特征 C: 1min K线头部脉冲 + 后续全是死线 = 拉盘后无人接盘
         if not exclude_reason:
             try:
-                kline_query_addr = t.get("gtPoolAddress") or addr
+                kline_query_addr = t.get("gtPoolAddress")
+                if not kline_query_addr:
+                    gt_pool = gt_get_pool_address(addr)
+                    if gt_pool:
+                        kline_query_addr = gt_pool
+                        t["gtPoolAddress"] = gt_pool  # 缓存
+                    else:
+                        kline_query_addr = addr
                 candles_15m = gt_ohlcv_15min(kline_query_addr, limit=12)  # 最近 3 小时的 15min K线
                 candles_1m = gt_ohlcv_1min(kline_query_addr, limit=30)    # 最近 30 根 1min K线
                 fake_result = detect_fake_candles(candles_15m, candles_1m)
