@@ -244,7 +244,14 @@ FM_HEADERS = {
     "Origin": "https://four.meme",
     "Referer": "https://four.meme/",
 }
-GT_HEADERS = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+GT_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.geckoterminal.com/",
+    "Origin": "https://www.geckoterminal.com",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+}
 DS_HEADERS = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
 BINANCE_HEADERS = {
     "Content-Type": "application/json",
@@ -2783,12 +2790,18 @@ def _gt_request(url: str, max_retries: int = 3) -> dict | None:
                 log.warning("GT 429, 等待 %ds (%d/%d)", wait, attempt + 1, max_retries)
                 time.sleep(wait)
                 continue
+            if r.status_code != 200:
+                log.debug("GT 请求返回非200状态码: %d - %s (%d/%d)", 
+                          r.status_code, url[-60:], attempt + 1, max_retries)
             r.raise_for_status()
             _gt_rate_delay = max(0.5, _gt_rate_delay - 0.2)
             return r.json()
-        except Exception:
+        except Exception as e:
+            log.debug("GT 请求失败 [%s]: %s (尝试 %d/%d)", 
+                      url[-60:], str(e)[:100], attempt + 1, max_retries)
             if attempt < max_retries - 1:
                 time.sleep(3)
+    log.warning("GT 请求最终失败 [%s]", url[-60:])
     return None
 
 
@@ -2811,6 +2824,57 @@ def gt_holder_counts(addresses: list[str]) -> dict[str, int]:
                 result[addr] = holders
         time.sleep(0.4)  # ~2.5 req/s, 留余量避免 429
     log.info("GT 查到 %d/%d 个代币持币数", len(result), len(addresses))
+    return result
+
+
+def gt_get_pool_address(token_address: str) -> str | None:
+    """
+    从 GeckoTerminal API 获取代币的 pool 地址
+    当 DexScreener 没有返回 pairAddress 时使用此函数作为备选
+    GeckoTerminal API: GET /networks/bsc/tokens/{address}/pools
+    """
+    try:
+        url = f"{GT_BASE}/networks/bsc/tokens/{token_address}/pools"
+        data = _gt_request(url)
+        if not data:
+            return None
+        
+        pools = data.get("data", [])
+        if not pools:
+            log.debug("GT pools API 返回空列表 [%s]", token_address[:16])
+            return None
+        
+        for pool in pools:
+            pool_addr = pool.get("id", "")
+            if pool_addr:
+                # 从 id 中提取地址: "networks/bsc/pools/0x1234..." -> "0x1234..."
+                if "pools/" in pool_addr:
+                    addr = pool_addr.split("pools/")[-1].lower()
+                    if addr.startswith("0x") and len(addr) == 42:
+                        log.debug("GT 获取 pool 地址成功 [%s]: %s", token_address[:16], addr[:16])
+                        return addr
+        log.debug("GT pools API 未找到有效 pool 地址 [%s]", token_address[:16])
+    except Exception as e:
+        log.debug("GT 获取 pool 地址失败 [%s]: %s", token_address[:16], str(e)[:50])
+    
+    return None
+
+
+def gt_batch_pool_addresses(token_addresses: list[str]) -> dict[str, str]:
+    """
+    批量从 GeckoTerminal API 获取代币的 pool 地址
+    """
+    result = {}
+    if not token_addresses:
+        return result
+    
+    for addr in token_addresses:
+        pool_addr = gt_get_pool_address(addr)
+        if pool_addr:
+            result[addr] = pool_addr
+        time.sleep(0.4)  # 控制速率
+    
+    log.info("GT 批量获取 pool 地址: %d/%d", len(result), len(token_addresses))
     return result
 
 
@@ -2926,11 +2990,28 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     """
     # 优先用池子地址查询 K 线
     query_addr = gt_pool_addr or token_address
+    used_pool_addr = gt_pool_addr
+    
+    if not gt_pool_addr:
+        log.debug("K线查询: gtPoolAddress 为空, 使用代币地址 [%s]", token_address[:16])
     
     # 48 小时 = 48 * 4 = 192 根 15 分钟 K 线
     candles = gt_ohlcv_15min(query_addr, limit=192)
     
+    # 如果第一次查询失败且没有使用 GT pool 地址，尝试从 GT 获取 pool 地址并重试
+    if (not candles or len(candles) == 0) and not gt_pool_addr:
+        log.debug("K线查询失败, 尝试从 GT 获取 pool 地址 [%s]", token_address[:16])
+        gt_pool_from_api = gt_get_pool_address(token_address)
+        if gt_pool_from_api:
+            log.debug("GT 获取到 pool 地址: %s", gt_pool_from_api[:16])
+            query_addr = gt_pool_from_api
+            used_pool_addr = gt_pool_from_api
+            candles = gt_ohlcv_15min(query_addr, limit=192)
+    
     if not candles or len(candles) == 0:
+        log.info("K线查询失败: [%s] 无数据 (query_addr=%s, pool_addr=%s)", 
+                 token_address[:16], query_addr[:16], 
+                 used_pool_addr[:16] if used_pool_addr else "None")
         return (True, "K线数据缺失(已放行)", {"_kline_missing": True, "reason": "无K线数据"})
     
     # K 线格式: [timestamp, open, high, low, close, volume]
