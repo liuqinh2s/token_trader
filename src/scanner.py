@@ -4648,6 +4648,87 @@ def tag_filter(candidates: list[dict], now_ms: int,
     return results, []
 
 
+def premium_screening_channel(survivors: list[dict], now_ms: int, cfg: dict) -> list[dict]:
+    """
+    New Premium Screening Channel:
+    - Token age <= 15 minutes (0.25 hours)
+    - Price between 0.0000032 and 0.000004
+    - Pick token with highest progress
+    - Check K-line high <= 0.0000045
+    - If no K-line, send DingTalk alert and log
+    """
+    log.info("--- Premium Screening Channel ---")
+    
+    filtered = []
+    for t in survivors:
+        age_hours = (now_ms - t.get("createdAt", 0)) / 3600000
+        price = t.get("price", 0)
+        
+        # Check age <= 15 minutes
+        if age_hours > 0.25:
+            continue
+            
+        # Check price range
+        if not (0.0000032 <= price <= 0.000004):
+            continue
+            
+        filtered.append(t)
+        
+    if not filtered:
+        log.info("Premium channel: No tokens meet age and price criteria")
+        return []
+        
+    # Sort by progress descending
+    filtered_sorted = sorted(filtered, key=lambda x: x.get("progress", 0), reverse=True)
+    candidate = filtered_sorted[0]
+    log.info("Premium channel: Selected candidate %s (progress=%.2f%%, price=%.8f, age=%.1f min)", 
+             candidate.get("name") or candidate["address"][:16],
+             candidate.get("progress", 0) * 100,
+             candidate.get("price", 0),
+             (now_ms - candidate.get("createdAt", 0)) / 60000)
+    
+    # Get K-line for this candidate
+    gt_pool_addr = candidate.get("gtPoolAddress") or candidate.get("address")
+    normalized_pool = _normalize_address(gt_pool_addr)
+    if normalized_pool:
+        query_addr = normalized_pool
+    else:
+        query_addr = candidate["address"]
+        
+    candles = gt_ohlcv_15min(query_addr, limit=192)
+    
+    if not candles or len(candles) == 0:
+        log.error("Premium channel: Failed to get K-line for %s", candidate.get("name") or candidate["address"][:16])
+        # Send DingTalk alert
+        bot_token = cfg.get("dingtalk_webhook", "")
+        secret = cfg.get("dingtalk_secret", "")
+        if bot_token and "YOUR" not in bot_token:
+            msg = f"⚠️ Premium Screening Channel Alert\n"
+            msg += f"Token: {candidate.get('name') or candidate.get('symbol') or candidate['address']}\n"
+            msg += f"Address: {candidate['address']}\n"
+            msg += f"Reason: Failed to get K-line data"
+            try:
+                send_dingtalk(bot_token, secret, "Premium Channel Alert", msg)
+                log.info("Premium channel: Sent DingTalk alert for missing K-line")
+            except Exception as e:
+                log.error("Premium channel: Failed to send DingTalk alert: %s", e)
+        return []
+        
+    # Check K-line high
+    kline_high = max(float(c[2]) for c in candles if c[2] > 0)
+    log.info("Premium channel: K-line high for %s is %.8f", 
+             candidate.get("name") or candidate["address"][:16], kline_high)
+    
+    if kline_high > 0.0000045:
+        log.info("Premium channel: K-line high (%.8f) exceeds 0.0000045, rejected", kline_high)
+        return []
+        
+    # Passed!
+    log.info("Premium channel: Candidate %s passed!", candidate.get("name") or candidate["address"][:16])
+    candidate["_premium_channel"] = True
+    return [candidate]
+
+
 def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
@@ -5219,7 +5300,19 @@ def scan_once(cfg: dict) -> dict:
     # 计算大盘情绪
     market_sentiment = calc_market_sentiment(survivors, queue_state)
     scan_round = queue_state.get("scanRound", _scan_count - 1) + 1
-    quality_results, _ = tag_filter(survivors, now_ms, market_sentiment)
+    tag_results, _ = tag_filter(survivors, now_ms, market_sentiment)
+    
+    # 新增: 新精筛通道 (独立于标签)
+    premium_results = premium_screening_channel(survivors, now_ms, cfg)
+    
+    # 合并两个通道的结果 (去重)
+    quality_results = []
+    seen_addrs = set()
+    for t in tag_results + premium_results:
+        addr = t.get("address", "")
+        if addr and addr not in seen_addrs:
+            seen_addrs.add(addr)
+            quality_results.append(t)
 
     # 精筛代币持币数刷新: 用 BSCScan 网页爬取真实持币数 (four.meme detail 对未毕业币不准)
     # 必须在再验证之前执行, 否则再验证用的是旧数据
@@ -5502,12 +5595,13 @@ def scan_once(cfg: dict) -> dict:
     if no_kline_count > 0:
         log.info("K线数据: %d 个有K线, %d 个无K线 (不影响推送)", len(kline_results), no_kline_count)
 
-    # 过滤: 只推送有加分项的代币 (bonus_score > 0)
-    bonus_filtered = [t for t in quality_results_for_dingding if t.get("_bonus_score", 0) > 0]
-    no_bonus_count = len(quality_results_for_dingding) - len(bonus_filtered)
-    if no_bonus_count > 0:
-        log.info("加分项过滤: %d 个有加分项, %d 个无加分项 (不推送)",
-                 len(bonus_filtered), no_bonus_count)
+    # 过滤: 只推送有加分项的代币 OR 来自新精筛通道的代币
+    bonus_or_premium_filtered = [t for t in quality_results_for_dingding if 
+                                 t.get("_bonus_score", 0) > 0 or t.get("_premium_channel", False)]
+    excluded_count = len(quality_results_for_dingding) - len(bonus_or_premium_filtered)
+    if excluded_count > 0:
+        log.info("加分项/新通道过滤: %d 个符合条件, %d 个不符合 (不推送)",
+                 len(bonus_or_premium_filtered), excluded_count)
 
     # 过滤: 已持仓 / 卖出冷却期内 (这些情况不推送精筛报告)
     # 需要连接数据库检查
@@ -5517,10 +5611,10 @@ def scan_once(cfg: dict) -> dict:
     final_filtered = []
     held_count = 0
     cooldown_count = 0
-    if trading_enabled and len(bonus_filtered) > 0:
+    if trading_enabled and len(bonus_or_premium_filtered) > 0:
         import sqlite3
         conn = sqlite3.connect(str(DB_PATH))
-        for t in bonus_filtered:
+        for t in bonus_or_premium_filtered:
             addr = t.get("address", "")
             name = t.get("name") or t.get("symbol") or addr[:16]
             
@@ -5540,7 +5634,7 @@ def scan_once(cfg: dict) -> dict:
             final_filtered.append(t)
         conn.close()
     else:
-        final_filtered = bonus_filtered
+        final_filtered = bonus_or_premium_filtered
     
     if held_count > 0:
         log.info("持仓过滤: %d 个已有持仓 (不推送)", held_count)
