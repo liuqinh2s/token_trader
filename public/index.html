@@ -673,6 +673,22 @@
       color: #000;
     }
 
+    .tag-first-round {
+      background: linear-gradient(135deg, #ff6b35, #ff8c42);
+      color: #fff;
+      font-weight: 700;
+      animation: first-round-pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes first-round-pulse {
+      0%, 100% {
+        box-shadow: 0 0 4px rgba(255, 107, 53, 0.5);
+      }
+      50% {
+        box-shadow: 0 0 12px rgba(255, 107, 53, 0.8);
+      }
+    }
+
     .tags-cell {
       max-width: 220px;
     }
@@ -868,6 +884,11 @@
 
     .token-card:active {
       transform: scale(0.99);
+    }
+
+    .token-card.first-round {
+      border: 2px solid #ff6b35;
+      box-shadow: 0 0 16px rgba(255, 107, 53, 0.3);
     }
 
     .card-top {
@@ -2248,6 +2269,13 @@
             <div class="flow-desc">本地统计同名代币数量，≥3 个同名标记为仿盘；仿盘&lt;3 在精筛中排除</div>
           </div>
         </div>
+        <div class="flow-step">
+          <span class="flow-num">6</span>
+          <div>
+            <div class="flow-title">第一轮买入 (v20 新增)</div>
+            <div class="flow-desc">价格 0.0000032~0.000004 且币龄&lt;15min 的新代币，按进度排序每轮最多买 1 个</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2294,6 +2322,23 @@
     </div>
 
     <div class="about-section">
+      <h3>🚀 第一轮买入策略（v20 新增）</h3>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
+        在第一轮扫描时就执行买入，适用于价格处于特定区间且币龄极短的代币。与精筛策略独立执行。
+      </p>
+      <ul class="about-list">
+        <li>价格范围: 0.0000032 ~ 0.000004（meme 币的黄金买入区间）</li>
+        <li>币龄限制: &lt; 15 分钟（确保捕捉最早期的机会）</li>
+        <li>优先级: 按进度降序排列，进度最高的优先买</li>
+        <li>每轮限额: 最多只买 1 个，控制风险</li>
+        <li>独立执行: 在常规精筛买入之前执行，不受精筛条件限制</li>
+      </ul>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
+        第一轮买入的代币会在前端精筛结果中以醒目橙色边框和「🚀第一轮」标签显示。
+      </p>
+    </div>
+
+    <div class="about-section">
       <h3>📊 数据源</h3>
       <ul class="about-list">
         <li>BSC RPC — 链上 TokenCreated 事件发现（four.meme + flap.sh，均使用 bonding curve）</li>
@@ -2318,6 +2363,7 @@
     <div class="about-section">
       <h3>🏷️ 标签说明</h3>
       <div class="about-tags">
+        <span class="tag tag-first-round">🚀第一轮</span> <span class="about-tag-desc">第一轮扫描买入策略</span>
         <span class="tag tag-copycat">🔥 仿盘</span> <span class="about-tag-desc">≥3 个同名代币标记；仿盘&lt;5 精筛排除</span>
         <span class="tag tag-boost">🚀 Boost</span> <span class="about-tag-desc">DexScreener 付费推广，项目方投入资金的正向信号</span>
         <span class="tag tag-twitter">𝕏</span> <span class="about-tag-desc">Twitter</span>
@@ -2668,9 +2714,16 @@
       if (token.is_quality_deployer) {
         html += '<span class="tag tag-boost" title="该开发者曾发过10倍以上涨幅代币">⭐优质开发者</span>';
       }
-      // 加分标签 (bonus_tags)
-      if (token.bonus_tags && token.bonus_tags.length > 0) {
-        for (const bt of token.bonus_tags) {
+      // 第一轮买入特殊标签 (醒目显示)
+      if (token._is_first_round || (token.bonus_tags && token.bonus_tags.some(t => t.includes('第一轮买入'))) || (token._bonus_tags && token._bonus_tags.some(t => t.includes('第一轮买入')))) {
+        html += '<span class="tag tag-first-round" title="第一轮扫描买入策略">🚀第一轮</span>';
+      }
+      // 加分标签 (bonus_tags / _bonus_tags)
+      const bonusTags = token.bonus_tags || token._bonus_tags || [];
+      if (bonusTags.length > 0) {
+        for (const bt of bonusTags) {
+          // 跳过第一轮买入，因为已经单独显示了
+          if (bt.includes('第一轮买入')) continue;
           let cls = 'tag-bonus';
           if (bt.includes('强卖压')) cls = 'tag-bonus-bad';
           else if (bt.includes('强买压') || bt.includes('优质开发者') || bt.includes('持币≥1k') || bt.includes('持仓合理')) cls = 'tag-bonus-good';
@@ -2691,12 +2744,10 @@
       if (token.boosts > 0) {
         html += `<span class="tag tag-boost" title="DexScreener Boost: ${token.boosts}个活跃推广">🚀${token.boosts}Boost</span>`;
       }
-      const sl = token.social_links;
-      if (sl) {
-        if (sl.twitter) html += `<span class="tag tag-twitter"><a href="${esc(sl.twitter)}" target="_blank" rel="noopener">𝕏</a></span>`;
-        if (sl.telegram) html += `<span class="tag tag-telegram"><a href="${esc(sl.telegram)}" target="_blank" rel="noopener">TG</a></span>`;
-        if (sl.website) html += `<span class="tag tag-website"><a href="${esc(sl.website)}" target="_blank" rel="noopener">Web</a></span>`;
-      }
+      const sl = token.social_links || token.socialLinks || {};
+      if (sl.twitter) html += `<span class="tag tag-twitter"><a href="${esc(sl.twitter)}" target="_blank" rel="noopener">𝕏</a></span>`;
+      if (sl.telegram) html += `<span class="tag tag-telegram"><a href="${esc(sl.telegram)}" target="_blank" rel="noopener">TG</a></span>`;
+      if (sl.website) html += `<span class="tag tag-website"><a href="${esc(sl.website)}" target="_blank" rel="noopener">Web</a></span>`;
       return html || '<span style="color:var(--text-muted)">--</span>';
     }
 
@@ -2860,7 +2911,9 @@ function renderData(data) {
       const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
       const bonusBadge = (t.bonus_score != null && t.bonus_score > 0)
         ? `<span class="bonus-badge" title="加分总分">🎖${t.bonus_score}</span>` : '';
-      return `<div class="token-card">
+      const isFirstRound = t._is_first_round || (t.bonus_tags && t.bonus_tags.some(tag => tag.includes('第一轮买入'))) || (t._bonus_tags && t._bonus_tags.some(tag => tag.includes('第一轮买入')));
+      const cardClass = isFirstRound ? 'token-card first-round' : 'token-card';
+      return `<div class="${cardClass}">
         ${scanTimeHtml}
         <div class="card-top">
           <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span>${bonusBadge}</span>
