@@ -131,11 +131,22 @@ def main():
 
                 # 3. 测试 pool OHLCV API (使用返回的 pool id)
                 if pool_id:
-                    # pool_id 格式: "networks/bsc/pools/0x..."
+                    # pool_id 格式可能是:
+                    #   旧: "networks/bsc/pools/0x..."
+                    #   新: "bsc_0x..."
                     if "pools/" in pool_id:
                         pool_addr = pool_id.split("pools/")[-1]
+                    elif "_0x" in pool_id:
+                        pool_addr = "0x" + pool_id.split("_0x", 1)[-1]
                     else:
                         pool_addr = pool_id
+
+                    # 也尝试从 attributes.address 获取
+                    attrs = pools[0].get("attributes", {})
+                    attr_addr = attrs.get("address", "")
+                    if attr_addr:
+                        print(f"  从 attributes 获取地址: {attr_addr}")
+                        pool_addr = attr_addr
 
                     url3 = f"{GT_BASE}/networks/bsc/pools/{pool_addr}/ohlcv/hour?aggregate=1&limit=24"
                     test_api(url3, "Pool OHLCV (hour) API")

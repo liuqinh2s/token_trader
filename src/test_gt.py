@@ -96,9 +96,19 @@ def test_token_pools(token_addr):
             print(f"  id 类型: {type(pool_id)}")
 
             # 提取池子地址
-            if "pools/" in pool_id:
+            # 优先从 attributes.address 获取
+            attrs = first_pool.get("attributes", {})
+            attr_addr = attrs.get("address", "") if isinstance(attrs, dict) else ""
+            if attr_addr and attr_addr.startswith("0x") and len(attr_addr) == 42:
+                print(f"  从 attributes.address 提取: {attr_addr}")
+                print(f"  池子地址长度: {len(attr_addr)}")
+            elif "pools/" in pool_id:
                 pool_addr = pool_id.split("pools/")[-1]
                 print(f"  提取的池子地址: {pool_addr}")
+                print(f"  池子地址长度: {len(pool_addr)}")
+            elif "_0x" in pool_id:
+                pool_addr = "0x" + pool_id.split("_0x", 1)[-1]
+                print(f"  从 bsc_0x 格式提取: {pool_addr}")
                 print(f"  池子地址长度: {len(pool_addr)}")
             else:
                 print(f"  ⚠️ id 格式不符合预期: {pool_id}")
@@ -269,9 +279,21 @@ def main():
             first_pool = pools[0]
             if isinstance(first_pool, dict):
                 pool_id = first_pool.get("id", "")
-                if "pools/" in pool_id:
-                    pool_addr = pool_id.split("pools/")[-1]
+                pool_addr = None
 
+                # 优先从 attributes.address 获取
+                attrs = first_pool.get("attributes", {})
+                attr_addr = attrs.get("address", "") if isinstance(attrs, dict) else ""
+                if attr_addr and attr_addr.startswith("0x") and len(attr_addr) == 42:
+                    pool_addr = attr_addr
+                    print(f"\n从 attributes.address 获取池子地址: {pool_addr}")
+                elif "pools/" in pool_id:
+                    pool_addr = pool_id.split("pools/")[-1]
+                elif "_0x" in pool_id:
+                    pool_addr = "0x" + pool_id.split("_0x", 1)[-1]
+                    print(f"\n从 id (bsc_0x格式) 提取池子地址: {pool_addr}")
+
+                if pool_addr:
                     # 测试 2: 用池子地址查询 OHLCV
                     test_pool_ohlcv(pool_addr, aggregate=15)
                     time.sleep(1)
