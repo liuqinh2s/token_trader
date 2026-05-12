@@ -543,6 +543,7 @@ FAKE_NAME_BLACKLIST = {
 # ================================================================
 FIRST_ROUND_MIN_PRICE = 0.0000032
 FIRST_ROUND_MAX_PRICE = 0.000004
+FIRST_ROUND_MAX_KLINE_HIGH = 0.0000045  # K线最高价不能超过这个
 FIRST_ROUND_MAX_AGE_HOURS = 15 / 60  # 15 分钟转换为小时
 FIRST_ROUND_MAX_BUY_PER_ROUND = 1     # 每轮最多买入一个
 
@@ -5129,7 +5130,32 @@ def scan_once(cfg: dict) -> dict:
                     created_at_ms = created_at
                 age_hours = (now_ms - created_at_ms) / 3600000 if created_at_ms > 0 else 999
                 
+                # 5. K线检查：获取K线并确认最高价不超过 0.0000045
+                kline_high_ok = False
                 if FIRST_ROUND_MIN_PRICE <= price <= FIRST_ROUND_MAX_PRICE and age_hours < FIRST_ROUND_MAX_AGE_HOURS:
+                    try:
+                        # 获取 15分钟 K线，检查最高价
+                        candles = gt_ohlcv_15min(t["address"], limit=60)  # 最近 15 小时的 K线（覆盖币龄可能更长一点）
+                        
+                        if candles and len(candles) > 0:
+                            # K线格式: [timestamp, open, high, low, close, volume]
+                            max_high = 0
+                            for candle in candles:
+                                high = candle[2]  # high 是第 3 个元素
+                                if high > max_high:
+                                    max_high = high
+                            
+                            if max_high <= FIRST_ROUND_MAX_KLINE_HIGH:
+                                kline_high_ok = True
+                                log.debug("第一轮买入K线检查通过: %s maxHigh=%.7f <= 0.0000045", t["address"][:16])
+                            else:
+                                log.info("第一轮买入跳过: %s K线最高%.7f > 0.0000045", t["address"][:16])
+                        else:
+                            log.info("第一轮买入跳过: %s 无K线数据", t["address"][:16])
+                    except Exception as e:
+                        log.info("第一轮买入K线查询失败: %s %s", t["address"][:16], str(e))
+                
+                if kline_high_ok:
                     first_round_candidates.append({
                         "token": t,
                         "detail": token_detail,
