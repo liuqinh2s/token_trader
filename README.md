@@ -85,6 +85,8 @@ python3 src/scanner.py
 | flap IPFS + flap.sh 页面   | flap 代币社交媒体 (twitter/telegram/website)          | ~5 req/s                    |
 | DexScreener API           | 批量价格+流动性+交易量+买卖笔数+涨跌幅+Boost          | ~300 req/min                |
 | GeckoTerminal OHLCV       | 15min K线 (精筛最后防线)                              | ~30 req/min (串行, 每个 2s) |
+| GeckoTerminal Token Info  | 代币基本信息 (名称/符号/发行量/价格/社交媒体等)       | ~30 req/min                  |
+| GeckoTerminal Token Pools | 代币关联的流动性池列表 (主要在 PancakeSwap 等 DEX)    | ~30 req/min                  |
 | Ethereum RPC (publicnode) | ETH Gas 大盘指数 (eth_feeHistory gasUsedRatio)        | 无硬限制                    |
 | Solana RPC (mainnet-beta) | SOL TPS 大盘指数 (getRecentPerformanceSamples)        | 无硬限制                    |
 | 本地队列统计              | 仿盘检测：同名/近似名代币数量                        | 无                          |
@@ -385,6 +387,127 @@ candles = [
     [1736490600000, 0.00002380, 0.00002450, 0.00002360, 0.00002420, 3456.78],
 ]
 # timestamp (ms), open/high/low/close (USD), volume (代币成交量)
+```
+
+---
+
+#### 7. GeckoTerminal Token Info — `GET /api/v2/networks/bsc/tokens/{address}/info`
+
+```json
+{
+  "data": {
+    "id": "bsc/0xd0e46e59d33f35b19c8e43812f29e3ec1dfc7777",
+    "type": "token",
+    "attributes": {
+      "name": "Example Token",
+      "symbol": "EXAMPLE",
+      "address": "0xd0e46e59d33f35b19c8e43812f29e3ec1dfc7777",
+      "decimals": 18,
+      "image_url": "https://example.com/image.png",
+      "websites": [{"url": "https://example.com", "label": "Website"}],
+      "telegram": "https://t.me/example",
+      "twitter": "https://twitter.com/example",
+      "discord": null,
+      "description": "Example token description",
+      "total_supply": "1000000000000000000000000000",
+      "price_usd": "0.00002340",
+      "market_cap_usd": "234000",
+      "volume_usd": {"h24": "123456.78"},
+      "price_change_percentage": {"h24": 12.45}
+    }
+  }
+}
+```
+
+**提取后字段:**
+
+```python
+{
+    "name": "Example Token",
+    "symbol": "EXAMPLE",
+    "description": "Example token description",
+    "image_url": "https://example.com/image.png",
+    "social_links": {
+        "website": "https://example.com",
+        "telegram": "https://t.me/example",
+        "twitter": "https://twitter.com/example"
+    },
+    "total_supply": 1000000000,  # 已除以 decimals
+    "price_usd": 0.00002340,
+    "market_cap_usd": 234000,
+    "volume_24h_usd": 123456.78,
+    "price_change_24h": 12.45
+}
+```
+
+---
+
+#### 8. GeckoTerminal Token Pools — `GET /api/v2/networks/bsc/tokens/{address}/pools`
+
+```json
+{
+  "data": [
+    {
+      "id": "bsc/0x16e4d3c7d27c4e34a45f6d1b3c8f9b0b2e3d4c5a",
+      "type": "pool",
+      "attributes": {
+        "dex_id": "pancakeswap",
+        "name": "EXAMPLE/WBNB",
+        "address": "0x16e4d3c7d27c4e34a45f6d1b3c8f9b0b2e3d4c5a",
+        "price_usd": "0.00002340",
+        "base_token_price_usd": "0.00002340",
+        "quote_token_price_usd": "580.00",
+        "base_token_price_native": "0.0000000403",
+        "quote_token_price_native": "1.0",
+        "fdv_usd": "234000",
+        "market_cap_usd": "234000",
+        "pool_created_at": "2024-01-01T00:00:00Z",
+        "txns": {
+          "m5": {"buys": 3, "sells": 1},
+          "h1": {"buys": 12, "sells": 6},
+          "h24": {"buys": 45, "sells": 23}
+        },
+        "volume_usd": {
+          "m5": "123.45",
+          "h1": "1234.56",
+          "h6": "5678.90",
+          "h24": "12345.67"
+        },
+        "price_change": {
+          "m5": 2.34,
+          "h1": 5.67,
+          "h6": -3.21,
+          "h24": 12.45
+        },
+        "liquidity_usd": "5678.90"
+      },
+      "relationships": {
+        "base_token": {"data": {"id": "bsc/0xd0e46e59d33f35b19c8e43812f29e3ec1dfc7777", "type": "token"}},
+        "quote_token": {"data": {"id": "bsc/0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "type": "token"}}
+      }
+    }
+  ]
+}
+```
+
+**提取后字段:**
+
+```python
+pools = [
+    {
+        "pool_address": "0x16e4d3c7d27c4e34a45f6d1b3c8f9b0b2e3d4c5a",
+        "dex": "pancakeswap",
+        "pair": "EXAMPLE/WBNB",
+        "price_usd": 0.00002340,
+        "liquidity_usd": 5678.90,
+        "volume_24h_usd": 12345.67,
+        "market_cap_usd": 234000,
+        "fdv_usd": 234000,
+        "txns_24h": {"buys": 45, "sells": 23},
+        "price_change_24h": 12.45,
+        "created_at": "2024-01-01T00:00:00Z"
+    }
+]
 ```
 
 ### 正常价区间
