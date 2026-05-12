@@ -2992,9 +2992,16 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     query_addr = gt_pool_addr or token_address
     used_pool_addr = gt_pool_addr
     
+    # 修复地址格式异常（如包含来源标识）
     if ":" in query_addr:
-        log.warning("K线查询地址格式异常: query_addr=%s, token_address=%s", query_addr, token_address)
+        log.warning("K线查询地址格式异常(含来源标识): query_addr=%s, token_address=%s", query_addr, token_address)
         query_addr = query_addr.split(":")[0]
+    
+    # 校验地址长度：BSC地址应为42字符（0x + 40位十六进制）
+    if len(query_addr) != 42 or not query_addr.startswith("0x"):
+        log.warning("K线查询地址长度异常: query_addr=%s (长度=%d), 使用代币地址 %s", 
+                   query_addr, len(query_addr), token_address)
+        query_addr = token_address
     
     if not gt_pool_addr:
         log.debug("K线查询: gtPoolAddress 为空, 使用代币地址 [%s]", token_address[:16])
@@ -3159,9 +3166,16 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
         pool_addr = t.get("gtPoolAddress") or token_addr
         limit = 4 if t.get("klineFixed") else 24
         
+        # 修复地址格式异常（如包含来源标识）
         if ":" in pool_addr:
-            log.warning("K线查询地址格式异常: pool_addr=%s, token_addr=%s", pool_addr, token_addr)
+            log.warning("K线查询地址格式异常(含来源标识): pool_addr=%s, token_addr=%s", pool_addr, token_addr)
             pool_addr = pool_addr.split(":")[0]
+        
+        # 校验地址长度：BSC地址应为42字符（0x + 40位十六进制）
+        if len(pool_addr) != 42 or not pool_addr.startswith("0x"):
+            log.warning("K线查询地址长度异常: pool_addr=%s (长度=%d), 使用代币地址 %s", 
+                       pool_addr, len(pool_addr), token_addr)
+            pool_addr = token_addr
         
         _rate_wait()
         try:
@@ -3823,8 +3837,10 @@ def elimination_check(queue: list[dict], now_ms: int,
             t["symbol"] = ds.get("symbol") or t.get("symbol", "")
             # 记录 GT 池子地址 (用于 GT K线查询, 部分代币 tokenAddress ≠ poolAddress)
             ds_pool = ds.get("pairAddress", "")
-            if ds_pool:
+            if ds_pool and len(ds_pool) == 42 and ds_pool.startswith("0x"):
                 t["gtPoolAddress"] = ds_pool
+            elif ds_pool:
+                log.warning("DexScreener 返回的 pairAddress 格式异常: %s (长度=%d)", ds_pool, len(ds_pool))
             # 更新交易量和买卖笔数 (DexScreener)
             t["volume24h"] = ds.get("volume24h", 0)
             t["volumeH1"] = ds.get("volumeH1", 0)
