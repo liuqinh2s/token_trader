@@ -380,6 +380,10 @@ def _init_positions_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE positions ADD COLUMN initial_position_value_usd REAL DEFAULT 0")
     except Exception:
         pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN remaining_amount TEXT DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     # 动能跟踪表: 记录每个持仓的持币数/流动性/进度历史
     conn.execute("""
         CREATE TABLE IF NOT EXISTS momentum (
@@ -2282,8 +2286,8 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
     conn.execute("""
         INSERT INTO positions
             (token_address, token_name, token_decimals, buy_price_usd, buy_amount,
-             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at, initial_position_value_usd)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)
+             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at, initial_position_value_usd, remaining_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
     """, (
         token_address.lower(),
         token_name,
@@ -2299,6 +2303,7 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
         channel,
         created_at,
         initial_value,
+        buy_result["token_amount"],  # 剩余数量初始 = 买入数量
     ))
     conn.commit()
 
@@ -2413,6 +2418,44 @@ def update_position_tp_state(conn: sqlite3.Connection, position_id: int,
         position_id
     ))
     conn.commit()
+
+
+def record_partial_sell(conn: sqlite3.Connection, position_id: int,
+                        sell_price_usd: float, sell_amount: int,
+                        sell_tx: str, sell_reason: str):
+    """记录部分卖出，更新剩余持仓"""
+    pos = conn.execute("SELECT remaining_amount, token_decimals, buy_price_usd FROM positions WHERE id = ?",
+                      (position_id,)).fetchone()
+    if not pos:
+        return
+
+    remaining_str, decimals, buy_price = pos
+    remaining = int(remaining_str) if remaining_str else 0
+
+    new_remaining = remaining - sell_amount
+    if new_remaining <= 0:
+        # 清仓了
+        close_position(conn, position_id, sell_price_usd, sell_tx, sell_reason, buy_price)
+    else:
+        # 部分卖出，更新剩余数量
+        now_ms = int(time.time() * 1000)
+        conn.execute("""
+            UPDATE positions SET
+                remaining_amount = ?,
+                current_price = ?,
+                sell_time = COALESCE(sell_time, ?),
+                sell_tx = COALESCE(sell_tx, ?),
+                sell_reason = ?
+            WHERE id = ?
+        """, (
+            str(new_remaining),
+            sell_price_usd,
+            now_ms,
+            sell_tx,
+            sell_reason,
+            position_id
+        ))
+        conn.commit()
 
 
 def record_momentum(conn: sqlite3.Connection, position_id: int,
@@ -2630,10 +2673,10 @@ def detect_scam_signals(history: list[dict], buy_time: int) -> dict:
 # ===================================================================
 def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
-                          momentum: dict | None = None) -> tuple[bool, str, dict]:
+                          momentum: dict | None = None) -> tuple[bool, str, dict, float]:
     """
     检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 固定止损 + 超期清仓)
-    返回: (是否应该卖出, 卖出原因, 更新的止盈状态)
+    返回: (是否应该卖出, 卖出原因, 更新的止盈状态, 卖出比例 0.0-1.0)
 
     新止盈策略:
       1. 分段止盈: 每累计涨 tp_step_pct (默认10%) 卖出剩余持仓的 tp_step_pct (默认10%)
@@ -2649,14 +2692,18 @@ def check_sell_conditions(pos: dict, current_price: float,
          - 回撤止盈激活后一直持续，且分段止盈仍然保持激活
          - 只有触发一次回撤止盈后，分段止盈才失活
       4. 重置逻辑:
-         - 触发一次回撤止盈后，只有价格重新突破最高价时才重新激活分段止盈
+         - 触发一次回撤止盈后，只有价格重新突破最高价才重新激活分段止盈
          - 否则只继续进行回撤止盈
+      5. 清仓逻辑: 当剩余仓位总价值小于初始总价值的10%时，清仓
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
     trading_cfg = cfg.get("trading", {})
     buy_price = pos["buy_price_usd"]
     max_price = pos["max_price_usd"] or 0
+    initial_value = pos.get("initial_position_value_usd", 0)
+    remaining_amount = int(pos.get("remaining_amount", pos.get("buy_amount", 0)))
+    decimals = pos.get("token_decimals", 18)
 
     tp_step_pct = trading_cfg.get("tp_step_pct", 10)
     tp_retrace_pct = trading_cfg.get("tp_retrace_pct", 50)
@@ -2676,16 +2723,25 @@ def check_sell_conditions(pos: dict, current_price: float,
         "step_tp_reset_price": step_tp_reset_price,
         "trailing_tp_count": trailing_tp_count,
         "trailing_tp_base_profit": trailing_tp_base_profit,
+        "initial_position_value_usd": initial_value,
     }
 
     if buy_price <= 0:
-        return False, "", tp_state
+        return False, "", tp_state, 0.0
 
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else 0
 
+    # 计算当前剩余持仓价值
+    remaining_value = (remaining_amount / (10 ** decimals)) * current_price
+
+    # 条件5：剩余仓位价值 < 初始价值 10%，清仓
+    if initial_value > 0 and remaining_value <= initial_value * 0.1:
+        return True, f"MIN_VALUE_SELL (剩余价值 ${remaining_value:.2f} < 初始 ${initial_value:.2f} 的 10%)", tp_state, 1.0
+
     sell_reason = ""
     should_sell = False
+    sell_ratio = 0.0
 
     if trailing_tp_triggered == 1 and step_tp_reset_price > 0 and max_price > step_tp_reset_price:
         tp_state["trailing_tp_triggered"] = 0
@@ -2709,14 +2765,13 @@ def check_sell_conditions(pos: dict, current_price: float,
                 break
 
         if triggered_step > tp_state["tp_step_count"]:
-            sell_pct = tp_step_pct
-            sell_amount = tp_step_pct / 100
             sell_reason = (f"STEP_TP_{triggered_step} (分段止盈#{triggered_step}: "
                           f"累计涨幅 {max_profit_pct:.1f}%, 触发 (1+{tp_step_pct}%)^{triggered_step} 止盈线, "
-                          f"卖出持仓 {sell_pct}%)")
+                          f"卖出持仓 {tp_step_pct}%)")
             tp_state["tp_step_count"] = triggered_step
             tp_state["step_tp_reset_price"] = max_price
             should_sell = True
+            sell_ratio = tp_step_pct / 100
 
     if tp_state["trailing_tp_active"] == 1 and not should_sell:
         if max_profit_pct > 0:
@@ -2728,35 +2783,35 @@ def check_sell_conditions(pos: dict, current_price: float,
 
             if profit_pct <= retrace_threshold:
                 tp_state["trailing_tp_count"] += 1
-                sell_pct = tp_retrace_sell_pct
                 if tp_state["trailing_tp_count"] == 1:
                     sell_reason = (f"TRAILING_TP_1 (回撤止盈#1: 最高盈利 {max_profit_pct:.1f}%, "
-                                  f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, 卖出持仓 {sell_pct}%)")
+                                  f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, 卖出持仓 {tp_retrace_sell_pct}%)")
                 else:
                     sell_reason = (f"TRAILING_TP_{tp_state['trailing_tp_count']} (回撤止盈#{tp_state['trailing_tp_count']}: "
                                   f"从 {tp_state['trailing_tp_base_profit']:.1f}% 回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, "
-                                  f"卖出持仓 {sell_pct}%)")
+                                  f"卖出持仓 {tp_retrace_sell_pct}%)")
                 tp_state["trailing_tp_base_profit"] = profit_pct
                 if tp_state["trailing_tp_triggered"] == 0:
                     tp_state["trailing_tp_triggered"] = 1
                     tp_state["step_tp_reset_price"] = max_price
                 should_sell = True
+                sell_ratio = tp_retrace_sell_pct / 100
 
     if should_sell:
-        return True, sell_reason, tp_state
+        return True, sell_reason, tp_state, sell_ratio
 
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
     hold_hours = hold_ms / (3600 * 1000)
 
     expire_loss_hours = trading_cfg.get("expire_loss_hours", 24)
     if hold_hours >= expire_loss_hours and profit_pct < 0:
-        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", tp_state
+        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", tp_state, 1.0
 
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
     if profit_pct <= stop_loss_pct:
-        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), tp_state
+        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), tp_state, 1.0
 
-    return False, "", tp_state
+    return False, "", tp_state, 0.0
 
 
 # ===================================================================
@@ -3281,13 +3336,13 @@ def monitor_positions(cfg_loader, bnb_price_func):
 
                 # 检查卖出条件
                 pos_updated = {**pos, "max_price_usd": max_price}
-                should_sell, reason, tp_state = check_sell_conditions(
+                should_sell, reason, tp_state, sell_ratio = check_sell_conditions(
                     pos_updated, current_price, cfg, momentum=None)
 
                 update_position_tp_state(conn, pos["id"], tp_state)
 
                 if should_sell:
-                    log.info("触发卖出 %s: %s", name, reason)
+                    log.info("触发卖出 %s: %s (卖出比例: %.2f%%)", name, reason, sell_ratio * 100)
                     # 检测当前实际交易场所 (可能已从 bonding curve 迁移到 PancakeSwap)
                     current_venue = detect_venue(addr, source_hint=pos.get("source", ""))
                     # UNKNOWN 时回退到持仓记录的 venue (买入时确定的通道更可靠)
@@ -3296,69 +3351,88 @@ def monitor_positions(cfg_loader, bnb_price_func):
                         log.warning("detect_venue 返回 UNKNOWN, 回退到持仓记录 venue=%s: %s",
                                     fallback_venue, name)
                         current_venue = fallback_venue
+
+                    # 计算要卖出的数量
+                    total_amount = int(pos.get("remaining_amount", pos.get("buy_amount", 0)))
+                    sell_amount = int(total_amount * sell_ratio)
+
                     if current_venue == "BONDING":
-                        sell_result = fm_sell_token(addr, token_name=name,
+                        sell_result = fm_sell_token(addr, amount=sell_amount,
+                                                    token_name=name,
                                                     bnb_price_usd=bnb_price)
                     elif current_venue == "FLAP":
-                        sell_result = flap_sell_token(addr, token_name=name,
+                        sell_result = flap_sell_token(addr, amount=sell_amount,
+                                                      token_name=name,
                                                       bnb_price_usd=bnb_price)
                     else:
-                        sell_result = sell_token(addr, slippage_pct=slippage,
+                        # PancakeSwap 支持部分卖出
+                        sell_result = sell_token(addr, amount=sell_amount,
+                                                 slippage_pct=slippage,
                                                  token_name=name,
                                                  bnb_price_usd=bnb_price)
-                    if sell_result:
-                        # 验证链上余额确认代币确实被卖出
-                        try:
-                            token_cs = Web3.to_checksum_address(addr)
-                            token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
-                            remaining = token_contract.functions.balanceOf(_wallet_address).call()
-                            if remaining > 0:
-                                decimals = token_contract.functions.decimals().call()
-                                remaining_amount = remaining / (10 ** decimals)
-                                remaining_value = remaining_amount * current_price
-                                if remaining_value > 0.5:
-                                    log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
-                                                name, remaining_amount, remaining_value)
-                                    notify_sell_failed(cfg, name, addr,
-                                                       f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
-                                    continue
-                        except Exception as e_check:
-                            log.debug("卖出后余额检查异常 %s: %s", name, e_check)
 
-                        close_position(conn, pos["id"], current_price,
-                                       sell_result["tx_hash"], reason, buy_price)
-                        pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                        notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
-                                    buy_price=buy_price, max_price=max_price,
-                                    sell_price=current_price)
-                        # 诈骗开发者记录: 亏损 80%+ 的代币, 记录 creator 到黑名单
-                        if pnl <= -80:
+                    if sell_result:
+                        if sell_ratio >= 1.0:
+                            # 清仓，验证链上余额确认代币确实被卖出
                             try:
-                                from scanner import load_queue, save_queue, ZERO_ADDRESS, DEPLOYER_BLACKLIST, DEPLOYER_SCAM_MIN_TOKENS
-                                _qs = load_queue()
-                                _bl = _qs.setdefault("deployerBlacklist", {})
-                                # 从队列中找到该代币的 creator
-                                _creator = ""
-                                for _t in _qs.get("tokens", []) + _qs.get("eliminated", []):
-                                    if isinstance(_t, dict) and _t.get("address", "").lower() == addr.lower():
-                                        _creator = (_t.get("creator") or "").lower()
-                                        break
-                                if _creator and _creator != ZERO_ADDRESS:
-                                    if _creator not in _bl:
-                                        _bl[_creator] = {"count": 0, "tokens": [], "firstSeen": int(time.time() * 1000), "lastSeen": int(time.time() * 1000)}
-                                    _entry = _bl[_creator]
-                                    if addr.lower() not in _entry["tokens"]:
-                                        _entry["tokens"].append(addr.lower())
-                                        _entry["count"] = len(_entry["tokens"])
-                                        _entry["lastSeen"] = int(time.time() * 1000)
-                                        save_queue(_qs)
-                                        # 更新运行时黑名单
-                                        if _entry["count"] >= DEPLOYER_SCAM_MIN_TOKENS:
-                                            DEPLOYER_BLACKLIST.add(_creator)
-                                        log.info("🚨 诈骗开发者记录 (交易亏损%.0f%%): %s — %s (累计%d个诈骗币)",
-                                                 pnl, _creator[:16], name, _entry["count"])
-                            except Exception as _e:
-                                log.debug("诈骗开发者记录失败: %s", _e)
+                                token_cs = Web3.to_checksum_address(addr)
+                                token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                                remaining = token_contract.functions.balanceOf(_wallet_address).call()
+                                if remaining > 0:
+                                    decimals = token_contract.functions.decimals().call()
+                                    remaining_amount = remaining / (10 ** decimals)
+                                    remaining_value = remaining_amount * current_price
+                                    if remaining_value > 0.5:
+                                        log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
+                                                    name, remaining_amount, remaining_value)
+                                        notify_sell_failed(cfg, name, addr,
+                                                           f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
+                                        continue
+                            except Exception as e_check:
+                                log.debug("卖出后余额检查异常 %s: %s", name, e_check)
+
+                            close_position(conn, pos["id"], current_price,
+                                           sell_result["tx_hash"], reason, buy_price)
+                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                                        buy_price=buy_price, max_price=max_price,
+                                        sell_price=current_price)
+                            # 诈骗开发者记录: 亏损 80%+ 的代币, 记录 creator 到黑名单
+                            if pnl <= -80:
+                                try:
+                                    from scanner import load_queue, save_queue, ZERO_ADDRESS, DEPLOYER_BLACKLIST, DEPLOYER_SCAM_MIN_TOKENS
+                                    _qs = load_queue()
+                                    _bl = _qs.setdefault("deployerBlacklist", {})
+                                    # 从队列中找到该代币的 creator
+                                    _creator = ""
+                                    for _t in _qs.get("tokens", []) + _qs.get("eliminated", []):
+                                        if isinstance(_t, dict) and _t.get("address", "").lower() == addr.lower():
+                                            _creator = (_t.get("creator") or "").lower()
+                                            break
+                                    if _creator and _creator != ZERO_ADDRESS:
+                                        if _creator not in _bl:
+                                            _bl[_creator] = {"count": 0, "tokens": [], "firstSeen": int(time.time() * 1000), "lastSeen": int(time.time() * 1000)}
+                                        _entry = _bl[_creator]
+                                        if addr.lower() not in _entry["tokens"]:
+                                            _entry["tokens"].append(addr.lower())
+                                            _entry["count"] = len(_entry["tokens"])
+                                            _entry["lastSeen"] = int(time.time() * 1000)
+                                            save_queue(_qs)
+                                            # 更新运行时黑名单
+                                            if _entry["count"] >= DEPLOYER_SCAM_MIN_TOKENS:
+                                                DEPLOYER_BLACKLIST.add(_creator)
+                                            log.info("🚨 诈骗开发者记录 (交易亏损%.0f%%): %s — %s (累计%d个诈骗币)",
+                                                     pnl, _creator[:16], name, _entry["count"])
+                                except Exception as _e:
+                                    log.debug("诈骗开发者记录失败: %s", _e)
+                        else:
+                            # 部分卖出，记录剩余持仓
+                            record_partial_sell(conn, pos["id"], current_price,
+                                                sell_amount, sell_result["tx_hash"], reason)
+                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                                        buy_price=buy_price, max_price=max_price,
+                                        sell_price=current_price)
                     else:
                         log.error("卖出失败: %s", name)
                         notify_sell_failed(cfg, name, addr,
