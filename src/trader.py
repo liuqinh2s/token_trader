@@ -308,6 +308,10 @@ FLAP_PORTAL_ABI = json.loads("""[
 # ===================================================================
 DB_PATH = Path(__file__).parent.parent / "tokens.db"
 
+# 数据库清理配置
+MAX_MOMENTUM_ENTRIES = 100  # 每个持仓最多保留的动能记录数
+MAX_POSITIONS_HISTORY_DAYS = 30  # 历史持仓记录保留天数
+
 
 def _init_positions_db(conn: sqlite3.Connection):
     """在已有的 tokens.db 中创建 positions 表"""
@@ -2361,6 +2365,31 @@ def record_momentum(conn: sqlite3.Connection, position_id: int,
         INSERT INTO momentum (position_id, ts, holders, liquidity, progress, price)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (position_id, int(time.time() * 1000), holders, liquidity, progress, price))
+    conn.commit()
+    
+    # 清理该持仓过多的历史记录（只保留最近 MAX_MOMENTUM_ENTRIES 条）
+    _clean_old_momentum(conn, position_id)
+
+
+def _clean_old_momentum(conn: sqlite3.Connection, position_id: int):
+    """清理指定持仓的旧动能记录，只保留最近 MAX_MOMENTUM_ENTRIES 条"""
+    conn.execute("""
+        DELETE FROM momentum
+        WHERE position_id = ? AND id NOT IN (
+            SELECT id FROM momentum WHERE position_id = ?
+            ORDER BY ts DESC LIMIT ?
+        )
+    """, (position_id, position_id, MAX_MOMENTUM_ENTRIES))
+    conn.commit()
+
+
+def cleanup_old_positions(conn: sqlite3.Connection):
+    """清理过期的历史持仓记录（超过 MAX_POSITIONS_HISTORY_DAYS 天的已平仓记录）"""
+    cutoff_ms = int(time.time() * 1000) - (MAX_POSITIONS_HISTORY_DAYS * 24 * 3600 * 1000)
+    conn.execute("""
+        DELETE FROM positions
+        WHERE status = 'CLOSED' AND sell_time IS NOT NULL AND sell_time < ?
+    """, (cutoff_ms,))
     conn.commit()
 
 

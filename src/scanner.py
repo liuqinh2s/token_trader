@@ -107,12 +107,14 @@ except Exception as _trader_err:
 # ===================================================================
 
 LOG_FILE = "scanner.log"
-LOG_RETENTION_HOURS = 48  # 日志保留时长（小时）
-_last_log_clean_date = None  # 上次清理日期
+LOG_RETENTION_HOURS = 24  # 日志保留时长（小时）- 从48小时减少到24小时
+LOG_MAX_SIZE_MB = 5  # 日志文件最大大小（MB）
+LOG_MAX_LINES = 50000  # 日志文件最大行数（约5MB）
+_last_log_clean_time = None  # 上次清理时间
 
 
-def _clean_old_logs(log_path: str, retention_hours: int) -> None:
-    """清理超过指定时长的旧日志行，保留近期日志"""
+def _clean_old_logs(log_path: str, retention_hours: int, max_lines: int = 50000) -> None:
+    """清理超过指定时长的旧日志行，保留近期日志，同时限制最大行数"""
     if not os.path.exists(log_path):
         return
     cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
@@ -120,8 +122,14 @@ def _clean_old_logs(log_path: str, retention_hours: int) -> None:
     try:
         with open(log_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
+        
         # 保留 cutoff 时间之后的日志行（日志格式: YYYY-MM-DD HH:MM:SS）
         kept = [line for line in lines if line[:13] >= cutoff_str or len(line) < 13]
+        
+        # 如果行数仍然超过限制，只保留最后 max_lines 行
+        if len(kept) > max_lines:
+            kept = kept[-max_lines:]
+        
         with open(log_path, "w", encoding="utf-8") as f:
             f.writelines(kept)
     except Exception as e:
@@ -130,19 +138,19 @@ def _clean_old_logs(log_path: str, retention_hours: int) -> None:
 
 
 def _maybe_clean_logs() -> None:
-    """每天清理一次旧日志"""
-    global _last_log_clean_date
-    today = datetime.now().date()
-    if _last_log_clean_date != today:
-        _last_log_clean_date = today
-        _clean_old_logs(LOG_FILE, LOG_RETENTION_HOURS)
+    """每小时清理一次旧日志（降低内存占用）"""
+    global _last_log_clean_time
+    now = datetime.now()
+    if _last_log_clean_time is None or (now - _last_log_clean_time).total_seconds() > 3600:
+        _last_log_clean_time = now
+        _clean_old_logs(LOG_FILE, LOG_RETENTION_HOURS, LOG_MAX_LINES)
 
 
 # 启动时清理一次
 _maybe_clean_logs()
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # 降低日志级别从 INFO 到 WARNING，减少日志量
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
