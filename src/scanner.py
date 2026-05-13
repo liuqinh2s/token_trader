@@ -2865,8 +2865,7 @@ def gt_holder_counts(addresses: list[str]) -> dict[str, int]:
 
 def gt_get_pool_address(token_address: str) -> str | None:
     """
-    从 GeckoTerminal API 获取代币的 pool 地址
-    当 DexScreener 没有返回 pairAddress 时使用此函数作为备选
+    从 GeckoTerminal API 获取代币流动性最大的 pool 地址
     GeckoTerminal API: GET /networks/bsc/tokens/{address}/pools
     """
     try:
@@ -2880,31 +2879,67 @@ def gt_get_pool_address(token_address: str) -> str | None:
             log.debug("GT pools API 返回空列表 [%s]", token_address[:16])
             return None
         
+        best_pool = None
+        best_liquidity = -1
+        
         for pool in pools:
-            # 优先从 attributes.address 字段提取（最可靠）
             attrs = pool.get("attributes", {})
-            if isinstance(attrs, dict):
-                addr_from_attr = attrs.get("address", "")
-                if addr_from_attr:
-                    addr = _normalize_address(addr_from_attr)
-                    if addr:
-                        log.debug("GT 获取 pool 地址成功 (attributes) [%s]: %s", token_address[:16], addr[:16])
-                        return addr
-
+            if not isinstance(attrs, dict):
+                continue
+            
+            # 获取池子地址
+            pool_addr = None
+            
+            # 优先从 attributes.address 字段提取
+            addr_from_attr = attrs.get("address", "")
+            if addr_from_attr:
+                pool_addr = _normalize_address(addr_from_attr)
+            
             # 兜底: 从 id 字段提取
-            # 格式可能是 "bsc_0x1234..." 或 "networks/bsc/pools/0x1234..."
-            pool_id = pool.get("id", "")
-            if pool_id:
-                if "pools/" in pool_id:
-                    raw = pool_id.split("pools/")[-1]
-                elif "_0x" in pool_id:
-                    raw = "0x" + pool_id.split("_0x", 1)[-1]
-                else:
-                    raw = pool_id
-                addr = _normalize_address(raw)
-                if addr:
-                    log.debug("GT 获取 pool 地址成功 (id) [%s]: %s", token_address[:16], addr[:16])
-                    return addr
+            if not pool_addr:
+                pool_id = pool.get("id", "")
+                if pool_id:
+                    if "pools/" in pool_id:
+                        raw = pool_id.split("pools/")[-1]
+                    elif "_0x" in pool_id:
+                        raw = "0x" + pool_id.split("_0x", 1)[-1]
+                    else:
+                        raw = pool_id
+                    pool_addr = _normalize_address(raw)
+            
+            if not pool_addr:
+                continue
+            
+            # 获取流动性，优先使用 liquidity_usd
+            liquidity = -1
+            liquidity_usd = attrs.get("liquidity_usd")
+            if liquidity_usd is not None and liquidity_usd != "":
+                try:
+                    liquidity = float(liquidity_usd)
+                except (ValueError, TypeError):
+                    pass
+            
+            # 如果没有 liquidity_usd，尝试从其他字段获取
+            if liquidity < 0:
+                reserve_usd = attrs.get("reserve_in_usd")
+                if reserve_usd is not None and reserve_usd != "":
+                    try:
+                        liquidity = float(reserve_usd)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 记录当前池子，选择流动性最大的
+            if liquidity > best_liquidity:
+                best_liquidity = liquidity
+                best_pool = pool_addr
+                log.debug("GT 找到更好的 pool [%s]: %s (liquidity=%.2f)", 
+                          token_address[:16], pool_addr[:16], liquidity)
+        
+        if best_pool:
+            log.info("GT 选择流动性最大的 pool [%s]: %s (liquidity=%.2f)", 
+                     token_address[:16], best_pool[:16], best_liquidity)
+            return best_pool
+        
         log.debug("GT pools API 未找到有效 pool 地址 [%s]", token_address[:16])
     except Exception as e:
         log.debug("GT 获取 pool 地址失败 [%s]: %s", token_address[:16], str(e)[:50])
@@ -3030,9 +3065,11 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     2. 防追高: 当前价格不大于前一根K线开盘价的50%，不大于前前根开盘价的100%
     3. 最高价到当前价格跌幅不大于 70%
 
+    注意: 获取K线必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
+
     参数:
         token_address: 代币地址
-        gt_pool_addr: GeckoTerminal 池子地址
+        gt_pool_addr: GeckoTerminal 池子地址 (已弃用，直接从API获取)
         current_price: 当前价格
         progress: 当前进度 (0~1)
         age_hours: 币龄 (小时)
@@ -3040,31 +3077,32 @@ def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: fl
     返回:
         (passed, fail_reason, kline_data): 是否通过检查, 失败原因, K线数据字典
     """
-    # 优先用池子地址查询 K 线
-    query_addr = gt_pool_addr or token_address
-    used_pool_addr = gt_pool_addr
+    # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
+    log.info("从 GT 获取最大流动性 pool 地址 [%s]", token_address[:16])
+    gt_pool_from_api = gt_get_pool_address(token_address)
     
-    # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
-    query_addr = _normalize_address(query_addr) or token_address
-    if query_addr != (gt_pool_addr or token_address):
-        log.warning("K线查询地址被规范化: %s -> %s", gt_pool_addr or token_address, query_addr)
+    query_addr = None
+    used_pool_addr = None
     
-    # 如果 DexScreener 返回的 pool 地址无效，优先从 GeckoTerminal 获取
-    if not gt_pool_addr or not _normalize_address(gt_pool_addr):
-        log.debug("gtPoolAddress 无效或为空 [%s], 从 GT 获取 pool 地址", token_address[:16])
-        gt_pool_from_api = gt_get_pool_address(token_address)
-        if gt_pool_from_api:
-            normalized = _normalize_address(gt_pool_from_api)
-            if normalized:
-                log.debug("GT 获取到 pool 地址: %s", normalized[:16])
-                query_addr = normalized
-                used_pool_addr = normalized
-            else:
-                log.warning("GT 返回的 pool 地址无法规范化: %s", gt_pool_from_api)
-                query_addr = _normalize_address(token_address) or token_address
-                used_pool_addr = None
+    if gt_pool_from_api:
+        normalized = _normalize_address(gt_pool_from_api)
+        if normalized:
+            log.info("使用 GT 获取的 pool 地址查询 K线: %s", normalized[:16])
+            query_addr = normalized
+            used_pool_addr = normalized
         else:
-            log.debug("GT 无法获取 pool 地址, 使用代币地址 [%s]", token_address[:16])
+            log.warning("GT 返回的 pool 地址无法规范化: %s", gt_pool_from_api)
+    else:
+        log.warning("GT 无法获取 pool 地址 [%s]", token_address[:16])
+    
+    # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gt_pool_addr 或代币地址（降级方案）
+    if not query_addr:
+        if gt_pool_addr and _normalize_address(gt_pool_addr):
+            log.warning("降级: 使用传入的 gtPoolAddress [%s]", gt_pool_addr[:16])
+            query_addr = _normalize_address(gt_pool_addr)
+            used_pool_addr = gt_pool_addr
+        else:
+            log.warning("降级: 使用代币地址查询 K线 [%s]", token_address[:16])
             query_addr = _normalize_address(token_address) or token_address
             used_pool_addr = None
     
@@ -3215,18 +3253,20 @@ def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
 
     def _query_one(t: dict) -> tuple[str, dict | None]:
         token_addr = t["address"]
-        pool_addr = t.get("gtPoolAddress")
         limit = 4 if t.get("klineFixed") else 24
         
-        # 如果 gtPoolAddress 为空或无效，先从 GT 获取 pool 地址
-        if not pool_addr or not _normalize_address(pool_addr):
-            log.debug("K线查询: gtPoolAddress 为空，从 GT 获取 pool 地址 [%s]", token_addr[:16])
-            _rate_wait()  # 获取 pool 地址前也需限流
-            pool_addr = gt_get_pool_address(token_addr)
-            if pool_addr:
-                log.debug("K线查询: GT 返回 pool 地址 [%s] -> [%s]", token_addr[:16], pool_addr[:16])
+        # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
+        log.debug("K线查询: 从 GT 获取最大流动性 pool 地址 [%s]", token_addr[:16])
+        _rate_wait()  # 获取 pool 地址前也需限流
+        pool_addr = gt_get_pool_address(token_addr)
+        
+        # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
+        if not pool_addr:
+            pool_addr = t.get("gtPoolAddress")
+            if pool_addr and _normalize_address(pool_addr):
+                log.debug("K线查询: 降级使用 gtPoolAddress [%s] -> [%s]", token_addr[:16], pool_addr[:16])
             else:
-                log.debug("K线查询: GT 未返回 pool 地址，使用代币地址 [%s]", token_addr[:16])
+                log.debug("K线查询: 降级使用代币地址 [%s]", token_addr[:16])
                 pool_addr = token_addr
         
         # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
@@ -4687,13 +4727,27 @@ def premium_screening_channel(survivors: list[dict], now_ms: int, cfg: dict) -> 
              candidate.get("price", 0),
              (now_ms - candidate.get("createdAt", 0)) / 60000)
     
-    # Get K-line for this candidate
-    gt_pool_addr = candidate.get("gtPoolAddress") or candidate.get("address")
-    normalized_pool = _normalize_address(gt_pool_addr)
-    if normalized_pool:
-        query_addr = normalized_pool
-    else:
-        query_addr = candidate["address"]
+    # Get K-line for this candidate - 必须先用 GeckoTerminal Token Pools API 获取最大流动性池子地址
+    log.info("Premium channel: 从 GT 获取最大流动性 pool 地址 [%s]", candidate["address"][:16])
+    gt_pool_from_api = gt_get_pool_address(candidate["address"])
+    
+    query_addr = None
+    if gt_pool_from_api:
+        normalized = _normalize_address(gt_pool_from_api)
+        if normalized:
+            log.info("Premium channel: 使用 GT 获取的 pool 地址查询 K线: %s", normalized[:16])
+            query_addr = normalized
+    
+    # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
+    if not query_addr:
+        gt_pool_addr = candidate.get("gtPoolAddress") or candidate.get("address")
+        normalized_pool = _normalize_address(gt_pool_addr)
+        if normalized_pool:
+            log.warning("Premium channel: 降级使用 gtPoolAddress [%s]", normalized_pool[:16])
+            query_addr = normalized_pool
+        else:
+            log.warning("Premium channel: 降级使用代币地址 [%s]", candidate["address"][:16])
+            query_addr = candidate["address"]
         
     candles = gt_ohlcv_15min(query_addr, limit=192)
     
@@ -4789,15 +4843,26 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
         # 特征 C: 1min K线头部脉冲 + 后续全是死线 = 拉盘后无人接盘
         if not exclude_reason:
             try:
-                # 如果 gtPoolAddress 为空或无效，先从 GT 获取 pool 地址
-                kline_query_addr = t.get("gtPoolAddress")
-                if not kline_query_addr or not _normalize_address(kline_query_addr):
-                    log.debug("假K线检测: gtPoolAddress 为空，从 GT 获取 [%s]", addr[:16])
-                    kline_query_addr = gt_get_pool_address(addr)
-                    if kline_query_addr:
-                        log.debug("假K线检测: GT 返回 pool 地址 [%s] -> [%s]", addr[:16], kline_query_addr[:16])
+                # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
+                log.debug("假K线检测: 从 GT 获取最大流动性 pool 地址 [%s]", addr[:16])
+                kline_query_addr = gt_get_pool_address(addr)
+                
+                # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
+                if not kline_query_addr:
+                    kline_query_addr = t.get("gtPoolAddress")
+                    if kline_query_addr and _normalize_address(kline_query_addr):
+                        log.debug("假K线检测: 降级使用 gtPoolAddress [%s] -> [%s]", addr[:16], kline_query_addr[:16])
                     else:
+                        log.debug("假K线检测: 降级使用代币地址 [%s]", addr[:16])
                         kline_query_addr = addr
+                
+                # 规范化地址
+                normalized_addr = _normalize_address(kline_query_addr)
+                if normalized_addr:
+                    kline_query_addr = normalized_addr
+                else:
+                    kline_query_addr = addr
+                
                 candles_15m = gt_ohlcv_15min(kline_query_addr, limit=12)  # 最近 3 小时的 15min K线
                 candles_1m = gt_ohlcv_1min(kline_query_addr, limit=30)    # 最近 30 根 1min K线
                 fake_result = detect_fake_candles(candles_15m, candles_1m)
