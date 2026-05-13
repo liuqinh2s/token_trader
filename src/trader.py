@@ -2615,10 +2615,19 @@ def check_sell_conditions(pos: dict, current_price: float,
     返回: (是否应该卖出, 卖出原因, 更新的止盈状态)
 
     新止盈策略:
-      1. 分段止盈: 每涨 tp_step_pct (默认10%) 卖出剩余持仓的 tp_step_pct (默认10%)
+      1. 分段止盈: 每累计涨 tp_step_pct (默认10%) 卖出剩余持仓的 tp_step_pct (默认10%)
+         - 累计涨幅计算: 第n次止盈 = (1 + tp_step_pct/100)^n - 1
+         - 例如: 第1次10%, 第2次(1.1^2-1)=21%, 第3次(1.1^3-1)=33.1%, ...
       2. 回撤止盈: 盈利每回撤 tp_retrace_pct (默认50%) 卖出剩余持仓的 tp_retrace_sell_pct (默认50%)
-      3. 触发条件: 当 tp_step_count >= 2 后激活回撤止盈, 此后持续生效
-      4. 重置条件: 回撤止盈触发后, 只有价格重新突破最高价才重新激活分段止盈
+         - 盈利定义: (最高价-买入价)/买入价
+         - 回撤触发: 当前盈利 ≤ 最高盈利 * (1 - tp_retrace_pct/100)
+      3. 激活逻辑:
+         - 触发两次分段止盈后激活回撤止盈
+         - 回撤止盈激活后一直持续，且分段止盈仍然保持激活
+         - 只有触发一次回撤止盈后，分段止盈才失活
+      4. 重置逻辑:
+         - 触发一次回撤止盈后，只有价格重新突破最高价时才重新激活分段止盈
+         - 否则只继续进行回撤止盈
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
@@ -2651,37 +2660,36 @@ def check_sell_conditions(pos: dict, current_price: float,
     sell_reason = ""
     should_sell = False
 
-    if trailing_tp_triggered == 1:
-        trailing_tp_active = 1
-
     if trailing_tp_triggered == 1 and step_tp_reset_price > 0 and max_price > step_tp_reset_price:
-        trailing_tp_active = 0
-        trailing_tp_triggered = 0
-        step_tp_reset_price = 0
+        tp_state["trailing_tp_triggered"] = 0
+        tp_state["step_tp_reset_price"] = 0
 
-    if trailing_tp_active == 0 and tp_step_count >= 2:
-        trailing_tp_active = 1
+    if tp_state["tp_step_count"] >= 2:
+        tp_state["trailing_tp_active"] = 1
 
-    if trailing_tp_active == 0:
-        step_thresholds = []
+    step_tp_active = (tp_state["trailing_tp_triggered"] == 0)
+
+    if step_tp_active:
+        triggered_step = 0
+        step_multiplier = 1 + tp_step_pct / 100
         for i in range(1, 100):
-            threshold = tp_step_pct * i
-            if threshold >= max_profit_pct + 0.001:
+            expected_profit = (step_multiplier ** i - 1) * 100
+            if max_profit_pct >= expected_profit - 0.001:
+                triggered_step = i
+            else:
                 break
-            step_thresholds.append(threshold)
 
-        triggered_step = len(step_thresholds)
-        if triggered_step > tp_step_count:
+        if triggered_step > tp_state["tp_step_count"]:
             sell_pct = tp_step_pct
             sell_amount = tp_step_pct / 100
             sell_reason = (f"STEP_TP_{triggered_step} (分段止盈#{triggered_step}: "
-                          f"累计涨幅 {max_profit_pct:.1f}%, 触发 {tp_step_pct}% 止盈线, "
+                          f"累计涨幅 {max_profit_pct:.1f}%, 触发 (1+{tp_step_pct}%)^{triggered_step} 止盈线, "
                           f"卖出持仓 {sell_pct}%)")
             tp_state["tp_step_count"] = triggered_step
             tp_state["step_tp_reset_price"] = max_price
             should_sell = True
 
-    if trailing_tp_active == 1 and not should_sell:
+    if tp_state["trailing_tp_active"] == 1 and not should_sell:
         if max_profit_pct > 0:
             retrace_threshold = max_profit_pct * (1 - tp_retrace_pct / 100)
             if profit_pct <= retrace_threshold:
@@ -2689,13 +2697,14 @@ def check_sell_conditions(pos: dict, current_price: float,
                 sell_reason = (f"TRAILING_TP (回撤止盈: 最高盈利 {max_profit_pct:.1f}%, "
                               f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, "
                               f"卖出持仓 {sell_pct}%)")
-                tp_state["trailing_tp_triggered"] = 1
+                if tp_state["trailing_tp_triggered"] == 0:
+                    tp_state["trailing_tp_triggered"] = 1
+                    tp_state["step_tp_reset_price"] = max_price
                 should_sell = True
 
     if should_sell:
         return True, sell_reason, tp_state
 
-    # ==================== 超期清仓 ====================
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
     hold_hours = hold_ms / (3600 * 1000)
 
@@ -2703,9 +2712,7 @@ def check_sell_conditions(pos: dict, current_price: float,
     if hold_hours >= expire_loss_hours and profit_pct < 0:
         return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", tp_state
 
-    # ==================== 固定止损 ====================
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
-
     if profit_pct <= stop_loss_pct:
         return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), tp_state
 
