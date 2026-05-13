@@ -2636,7 +2636,7 @@ def check_sell_conditions(pos: dict, current_price: float,
          - 第3次: 从上次触发盈利再回撤 50% (如 25%→12.5%)
          - 以此类推
       3. 激活逻辑:
-         - 触发两次分段止盈后激活回撤止盈
+         - 触发一次分段止盈后激活回撤止盈
          - 回撤止盈激活后一直持续，且分段止盈仍然保持激活
          - 只有触发一次回撤止盈后，分段止盈才失活
       4. 重置逻辑:
@@ -2684,7 +2684,7 @@ def check_sell_conditions(pos: dict, current_price: float,
         tp_state["trailing_tp_count"] = 0
         tp_state["trailing_tp_base_profit"] = 0
 
-    if tp_state["tp_step_count"] >= 2:
+    if tp_state["tp_step_count"] >= 1:
         tp_state["trailing_tp_active"] = 1
 
     step_tp_active = (tp_state["trailing_tp_triggered"] == 0)
