@@ -376,6 +376,10 @@ def _init_positions_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE positions ADD COLUMN trailing_tp_base_profit REAL DEFAULT 0")
     except Exception:
         pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN initial_position_value_usd REAL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     # 动能跟踪表: 记录每个持仓的持币数/流动性/进度历史
     conn.execute("""
         CREATE TABLE IF NOT EXISTS momentum (
@@ -2273,11 +2277,13 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
       created_at: 代币创建时间戳 (毫秒), 用于计算真正的币龄
     """
     now_ms = int(time.time() * 1000)
+    # 计算初始持仓总价值（买入价格 * 买入数量）
+    initial_value = buy_result["buy_price_usd"] * (int(buy_result["token_amount"]) / (10 ** decimals))
     conn.execute("""
         INSERT INTO positions
             (token_address, token_name, token_decimals, buy_price_usd, buy_amount,
-             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
+             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at, initial_position_value_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)
     """, (
         token_address.lower(),
         token_name,
@@ -2292,6 +2298,7 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
         buy_result.get("venue", "PANCAKE"),
         channel,
         created_at,
+        initial_value,
     ))
     conn.commit()
 
@@ -2392,7 +2399,8 @@ def update_position_tp_state(conn: sqlite3.Connection, position_id: int,
             trailing_tp_triggered = ?,
             step_tp_reset_price = ?,
             trailing_tp_count = ?,
-            trailing_tp_base_profit = ?
+            trailing_tp_base_profit = ?,
+            initial_position_value_usd = ?
         WHERE id = ?
     """, (
         tp_state.get("tp_step_count", 0),
@@ -2401,6 +2409,7 @@ def update_position_tp_state(conn: sqlite3.Connection, position_id: int,
         tp_state.get("step_tp_reset_price", 0),
         tp_state.get("trailing_tp_count", 0),
         tp_state.get("trailing_tp_base_profit", 0),
+        tp_state.get("initial_position_value_usd", 0),
         position_id
     ))
     conn.commit()
