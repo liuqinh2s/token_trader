@@ -1478,7 +1478,13 @@ def _flap_router_buy(token_address: str, buy_usdt: float, slippage_pct: float = 
 
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         if receipt["status"] != 1:
-            log.error("flap router 买入失败: %s", tx_hash.hex())
+            try:
+                tx = _w3.eth.get_transaction(tx_hash)
+                _w3.eth.call(tx, block_identifier='latest')
+            except Exception as e:
+                log.error("flap router 买入失败: %s, 原因: %s", tx_hash.hex(), str(e))
+            else:
+                log.error("flap router 买入失败: %s", tx_hash.hex())
             return None
 
         balance_after = token_contract.functions.balanceOf(_wallet_address).call()
