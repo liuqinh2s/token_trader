@@ -57,7 +57,7 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
     * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
   - 流动性异动: 仅已毕业, 两轮扫描之间流动性增加≥$1k且增长≥5%, 价格上涨且涨幅≤50%(+1)
   - 进度异动: 仅未毕业, 两轮之间进度涨≥10个百分点 + 价格上涨且涨幅≤50%(+1)
-  - 价格异动: 两轮扫描之间价格增长≥10%且≤50%(+1)
+  - 价格异动: 仅已毕业, 两轮扫描之间价格增长≥10%且≤50%(+1)
 
   K 线防线 (最后防线, 只对通过加分标签的代币执行):
   - 无K线数据时跳过K线相关检查、直接放行 (不影响推送和开仓)
@@ -4525,7 +4525,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
         * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
       - 流动性异动: 仅已毕业, 两轮扫描之间流动性增加≥$1k且增长≥5%, 价格上涨且涨幅≤50%
       - 进度异动: 仅未毕业, 两轮之间进度涨≥10个百分点 + 价格上涨且涨幅≤50%
-      - 价格异动: 两轮扫描之间价格增长≥10%且≤50%
+      - 价格异动: 仅已毕业, 两轮扫描之间价格增长≥10%且≤50%
 
     K 线防线 (最后防线, 只对通过加分标签的代币执行):
       - 币龄 <= 1h 时，当前进度 >= 20% (不依赖K线数据，优先检查)
@@ -4641,8 +4641,8 @@ def tag_filter(candidates: list[dict], now_ms: int,
                     bonus_score += BONUS_WEIGHT_PROGRESS_SURGE
                     bonus_tags.append(f"进度异动(+{prog_delta*100:.0f}%)")
 
-        # --- 加分: 价格异动 ---
-        if len(price_hist) >= 2 and price_hist[-2] > 0:
+        # --- 加分: 价格异动 (仅已毕业) ---
+        if is_graduated and len(price_hist) >= 2 and price_hist[-2] > 0:
             price_gain = (price_hist[-1] - price_hist[-2]) / price_hist[-2]
             if (price_gain >= BONUS_PRICE_SURGE_MIN_GAIN
                     and price_gain <= BONUS_PRICE_SURGE_MAX_GAIN):
