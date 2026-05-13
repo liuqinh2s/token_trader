@@ -368,6 +368,14 @@ def _init_positions_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE positions ADD COLUMN step_tp_reset_price REAL DEFAULT 0")
     except Exception:
         pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN trailing_tp_count INTEGER DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN trailing_tp_base_profit REAL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     # 动能跟踪表: 记录每个持仓的持币数/流动性/进度历史
     conn.execute("""
         CREATE TABLE IF NOT EXISTS momentum (
@@ -2382,13 +2390,17 @@ def update_position_tp_state(conn: sqlite3.Connection, position_id: int,
             tp_step_count = ?,
             trailing_tp_active = ?,
             trailing_tp_triggered = ?,
-            step_tp_reset_price = ?
+            step_tp_reset_price = ?,
+            trailing_tp_count = ?,
+            trailing_tp_base_profit = ?
         WHERE id = ?
     """, (
         tp_state.get("tp_step_count", 0),
         tp_state.get("trailing_tp_active", 0),
         tp_state.get("trailing_tp_triggered", 0),
         tp_state.get("step_tp_reset_price", 0),
+        tp_state.get("trailing_tp_count", 0),
+        tp_state.get("trailing_tp_base_profit", 0),
         position_id
     ))
     conn.commit()
@@ -2618,9 +2630,11 @@ def check_sell_conditions(pos: dict, current_price: float,
       1. 分段止盈: 每累计涨 tp_step_pct (默认10%) 卖出剩余持仓的 tp_step_pct (默认10%)
          - 累计涨幅计算: 第n次止盈 = (1 + tp_step_pct/100)^n - 1
          - 例如: 第1次10%, 第2次(1.1^2-1)=21%, 第3次(1.1^3-1)=33.1%, ...
-      2. 回撤止盈: 盈利每回撤 tp_retrace_pct (默认50%) 卖出剩余持仓的 tp_retrace_sell_pct (默认50%)
-         - 盈利定义: (最高价-买入价)/买入价
-         - 回撤触发: 当前盈利 ≤ 最高盈利 * (1 - tp_retrace_pct/100)
+      2. 回撤止盈 (累计式): 盈利每回撤 tp_retrace_pct (默认50%) 卖出剩余持仓的 tp_retrace_sell_pct (默认50%)
+         - 第1次: 从最高盈利回撤 50% (如 100%→50%)
+         - 第2次: 从上次触发盈利再回撤 50% (如 50%→25%)
+         - 第3次: 从上次触发盈利再回撤 50% (如 25%→12.5%)
+         - 以此类推
       3. 激活逻辑:
          - 触发两次分段止盈后激活回撤止盈
          - 回撤止盈激活后一直持续，且分段止盈仍然保持激活
@@ -2643,12 +2657,16 @@ def check_sell_conditions(pos: dict, current_price: float,
     trailing_tp_active = pos.get("trailing_tp_active", 0)
     trailing_tp_triggered = pos.get("trailing_tp_triggered", 0)
     step_tp_reset_price = pos.get("step_tp_reset_price", 0)
+    trailing_tp_count = pos.get("trailing_tp_count", 0)
+    trailing_tp_base_profit = pos.get("trailing_tp_base_profit", 0)
 
     tp_state = {
         "tp_step_count": tp_step_count,
         "trailing_tp_active": trailing_tp_active,
         "trailing_tp_triggered": trailing_tp_triggered,
         "step_tp_reset_price": step_tp_reset_price,
+        "trailing_tp_count": trailing_tp_count,
+        "trailing_tp_base_profit": trailing_tp_base_profit,
     }
 
     if buy_price <= 0:
@@ -2663,6 +2681,8 @@ def check_sell_conditions(pos: dict, current_price: float,
     if trailing_tp_triggered == 1 and step_tp_reset_price > 0 and max_price > step_tp_reset_price:
         tp_state["trailing_tp_triggered"] = 0
         tp_state["step_tp_reset_price"] = 0
+        tp_state["trailing_tp_count"] = 0
+        tp_state["trailing_tp_base_profit"] = 0
 
     if tp_state["tp_step_count"] >= 2:
         tp_state["trailing_tp_active"] = 1
@@ -2691,12 +2711,23 @@ def check_sell_conditions(pos: dict, current_price: float,
 
     if tp_state["trailing_tp_active"] == 1 and not should_sell:
         if max_profit_pct > 0:
-            retrace_threshold = max_profit_pct * (1 - tp_retrace_pct / 100)
+            retrace_multiplier = 1 - tp_retrace_pct / 100
+            if tp_state["trailing_tp_count"] == 0:
+                retrace_threshold = max_profit_pct * retrace_multiplier
+            else:
+                retrace_threshold = tp_state["trailing_tp_base_profit"] * retrace_multiplier
+
             if profit_pct <= retrace_threshold:
+                tp_state["trailing_tp_count"] += 1
                 sell_pct = tp_retrace_sell_pct
-                sell_reason = (f"TRAILING_TP (回撤止盈: 最高盈利 {max_profit_pct:.1f}%, "
-                              f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, "
-                              f"卖出持仓 {sell_pct}%)")
+                if tp_state["trailing_tp_count"] == 1:
+                    sell_reason = (f"TRAILING_TP_1 (回撤止盈#1: 最高盈利 {max_profit_pct:.1f}%, "
+                                  f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, 卖出持仓 {sell_pct}%)")
+                else:
+                    sell_reason = (f"TRAILING_TP_{tp_state['trailing_tp_count']} (回撤止盈#{tp_state['trailing_tp_count']}: "
+                                  f"从 {tp_state['trailing_tp_base_profit']:.1f}% 回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, "
+                                  f"卖出持仓 {sell_pct}%)")
+                tp_state["trailing_tp_base_profit"] = profit_pct
                 if tp_state["trailing_tp_triggered"] == 0:
                     tp_state["trailing_tp_triggered"] = 1
                     tp_state["step_tp_reset_price"] = max_price
