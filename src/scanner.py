@@ -441,6 +441,9 @@ LIMIT_PROGRESS_MAX_GAIN_ROUNDS = 4      # 检查近1~N轮整体进度涨幅
 LIMIT_PROGRESS_MAX_GAIN_PCT = 0.50      # 整体进度涨幅上限 (50个百分点)
 LIMIT_PROGRESS_MAX_DROP_ROUNDS = 8      # 检查近1~N轮整体进度跌幅
 LIMIT_PROGRESS_MAX_DROP_PCT = 0.15      # 整体进度跌幅上限 (15个百分点)
+# 历史最大跌幅 (快照最高价到最低价, 从 priceHistory 全部历史中计算)
+# 用于排除暴跌过的代币, 增强对代币的约束
+LIMIT_HISTORY_DROP_MAX_PCT = 0.60        # 历史最大跌幅上限 (60%)
 
 # --- 加分标签: DexScreener h1 价格变化限制 (已废弃, 由限制条件替代) ---
 # 保留常量供历史代码兼容, 但不再使用
@@ -4501,6 +4504,17 @@ def _check_limit_conditions(t: dict) -> tuple[bool, str]:
     if not passed:
         return False, reason
 
+    # 4. 历史最大跌幅检查 (快照最高价到最低价, 从 priceHistory 全部历史中计算)
+    if price_hist and len(price_hist) >= 2:
+        valid_prices = [p for p in price_hist if p > 0]
+        if len(valid_prices) >= 2:
+            hist_max_price = max(valid_prices)
+            hist_min_price = min(valid_prices)
+            if hist_max_price > 0 and hist_min_price > 0:
+                history_drop = (hist_max_price - hist_min_price) / hist_max_price
+                if history_drop > LIMIT_HISTORY_DROP_MAX_PCT:
+                    return False, f"历史最大跌幅{history_drop*100:.1f}%>{LIMIT_HISTORY_DROP_MAX_PCT*100:.0f}%"
+
     return True, ""
 
 
@@ -4515,6 +4529,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
         * 近1~8轮整体跌幅均≤15%
         * h1价格变化有数据时: 涨幅≤50% 且 跌幅≤15%
         * 快照最高价到当前价跌幅≤50%
+        * 历史最大跌幅(快照最高价到最低价)≤60%  <-- 新增
       - 进度限制 (加减法, 非乘除法):
         * 近1~4轮整体进度涨幅均≤50个百分点
         * 近1~8轮整体进度跌幅均≤15个百分点
