@@ -66,6 +66,7 @@ from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
 log = logging.getLogger(__name__)
+_last_sell_error = ""
 
 try:
     from error_handler import send_error_manually as _send_error
@@ -870,15 +871,21 @@ def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
     low = desired_amount + 1
     high = None
     probe = desired_amount
+    saw_estimate = est is not None
     while probe < balance:
         probe = min(balance, max(probe + 1, probe * 2))
         est = fm_try_sell(token_address, probe)
+        saw_estimate = saw_estimate or est is not None
         if est and est["netFunds"] > 0:
             high = probe
             break
         low = probe + 1
 
     if high is None:
+        if not saw_estimate:
+            log.warning("分段止盈 Helper 预检不可用，继续交给真实卖出入口模拟: %s, 目标=%d",
+                        token_name or token_address[:16], desired_amount)
+            return desired_amount
         log.warning("分段止盈预检失败，当前余额内找不到可执行卖出数量: %s, 目标=%d, 余额=%d",
                     token_name or token_address[:16], desired_amount, balance)
         return None
@@ -908,7 +915,7 @@ def _build_contract_call_data(signature: str, arg_types: list[str], args: list) 
 
 
 def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
-                              token_name: str = "") -> dict | None:
+                              token_name: str = "", quiet: bool = False) -> dict | None:
     """
     four.meme TokenManager 有多个版本，卖出入口签名可能不同。
     逐个用 eth_call/estimateGas 预检，选择当前 manager 真正可执行的 calldata。
@@ -958,8 +965,11 @@ def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
         except Exception as e:
             errors.append(f"{signature}: {e}")
 
-    log.error("four.meme 卖出入口全部预检失败 %s amount=%d: %s",
-              token_name or token_cs[:16], amount, " | ".join(errors))
+    global _last_sell_error
+    _last_sell_error = " | ".join(errors)
+    if not quiet:
+        log.error("four.meme 卖出入口全部预检失败 %s amount=%d: %s",
+                  token_name or token_cs[:16], amount, _last_sell_error)
     return None
 
 
@@ -1284,7 +1294,8 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
 
 
 def fm_sell_token(token_address: str, amount: int | None = None,
-                  token_name: str = "", bnb_price_usd: float = 600.0) -> dict | None:
+                  token_name: str = "", bnb_price_usd: float = 600.0,
+                  allow_amount_expand: bool = False) -> dict | None:
     """
     通过 four.meme bonding curve 卖出代币
     自动检测报价币 (quote):
@@ -1295,13 +1306,17 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         log.error("Web3/钱包未初始化")
         return None
 
+    global _last_sell_error
+    _last_sell_error = ""
     token_cs = Web3.to_checksum_address(token_address)
 
     try:
         token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
 
+        balance = token_contract.functions.balanceOf(_wallet_address).call()
         if amount is None:
-            amount = token_contract.functions.balanceOf(_wallet_address).call()
+            amount = balance
+        amount = min(amount, balance)
         if amount <= 0:
             log.warning("无代币可卖: %s", token_name or token_address[:16])
             return None
@@ -1370,6 +1385,22 @@ def fm_sell_token(token_address: str, amount: int | None = None,
             balance_before = _w3.eth.get_balance(_wallet_address)
 
         tx = fm_build_sell_transaction(manager_cs, token_cs, amount, token_name)
+        if tx is None and allow_amount_expand and amount < balance:
+            original_amount = amount
+            for candidate in (
+                balance * 20 // 100,
+                balance * 40 // 100,
+                balance * 80 // 100,
+            ):
+                candidate = min(max(candidate, original_amount + 1), balance)
+                if candidate <= amount:
+                    continue
+                tx = fm_build_sell_transaction(manager_cs, token_cs, candidate, token_name, quiet=True)
+                if tx is not None:
+                    log.warning("four.meme 分段卖出 10%% 模拟失败，已放大卖出数量 %s: %d → %d",
+                                token_name or token_address[:16], original_amount, candidate)
+                    amount = candidate
+                    break
         if tx is None:
             return None
 
@@ -1380,6 +1411,7 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         if receipt["status"] != 1:
             log.error("bonding curve 卖出失败: %s", tx_hash.hex())
+            _last_sell_error = f"tx status=0, hash={tx_hash.hex()}"
             return None
 
         # 计算收到的金额
@@ -1391,6 +1423,7 @@ def fm_sell_token(token_address: str, amount: int | None = None,
             return {
                 "tx_hash": tx_hash.hex(),
                 "usdt_received": usdt_received,
+                "token_sold": str(amount),
             }
         else:
             balance_after = _w3.eth.get_balance(_wallet_address)
@@ -1411,10 +1444,12 @@ def fm_sell_token(token_address: str, amount: int | None = None,
                 "tx_hash": tx_hash.hex(),
                 "usdt_received": usdt_received,
                 "bnb_received": bnb_received,
+                "token_sold": str(amount),
             }
 
     except Exception as e:
         log.error("bonding curve 卖出异常 [%s]: %s", token_name or token_address[:16], e)
+        _last_sell_error = str(e)
         return None
 
 
@@ -3375,7 +3410,8 @@ def monitor_positions(cfg_loader, bnb_price_func):
                     
                     if current_venue == "BONDING":
                         sell_result = fm_sell_token(addr, amount=sell_amount, token_name=name,
-                                                    bnb_price_usd=bnb_price)
+                                                    bnb_price_usd=bnb_price,
+                                                    allow_amount_expand=is_step_tp)
                     elif current_venue == "FLAP":
                         sell_result = flap_sell_token(addr, amount=sell_amount, token_name=name,
                                                       bnb_price_usd=bnb_price)
@@ -3402,7 +3438,13 @@ def monitor_positions(cfg_loader, bnb_price_func):
                             
                             # 发送通知
                             pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                            notify_reason = reason
+                            if sell_result.get("token_sold") and sell_amount is not None:
+                                actual_sold = int(sell_result["token_sold"])
+                                if actual_sold != sell_amount:
+                                    actual_pct = actual_sold / current_balance * 100 if current_balance > 0 else 0
+                                    notify_reason = f"{reason} (实际卖出约 {actual_pct:.1f}% 剩余持仓)"
+                            notify_sell(cfg, name, addr, notify_reason, pnl, sell_result["tx_hash"],
                                         buy_price=buy_price, max_price=max_price,
                                         sell_price=current_price)
                         else:
@@ -3461,8 +3503,10 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                 log.debug("诈骗开发者记录失败: %s", _e)
                     else:
                         log.error("卖出失败: %s", name)
+                        detail = _last_sell_error if current_venue == "BONDING" and _last_sell_error else ""
+                        detail_suffix = f", 预检: {detail[:300]}" if detail else ""
                         notify_sell_failed(cfg, name, addr,
-                                           f"交易执行失败 (venue={current_venue}, 触发原因: {reason})")
+                                           f"交易执行失败 (venue={current_venue}, 触发原因: {reason}{detail_suffix})")
 
                 time.sleep(1)  # 避免 RPC 限流
 
