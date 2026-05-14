@@ -1254,8 +1254,9 @@ def fm_sell_token(token_address: str, amount: int | None = None,
 
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         if receipt["status"] != 1:
-            log.error("bonding curve 卖出失败: %s", tx_hash.hex())
-            return None
+            log.error("bonding curve 卖出失败: %s, 尝试切换到 PancakeSwap 卖出", tx_hash.hex())
+            return sell_token(token_address, amount, token_name=token_name,
+                              bnb_price_usd=bnb_price_usd)
 
         # 计算收到的金额
         if is_usdt_quote:
