@@ -3382,8 +3382,14 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                 log.debug("诈骗开发者记录失败: %s", _e)
                     else:
                         log.error("卖出失败: %s", name)
-                        notify_sell_failed(cfg, name, addr,
-                                           f"交易执行失败 (venue={current_venue}, 触发原因: {reason})")
+                        diag_parts = [f"交易执行失败 (venue={current_venue})", f"触发原因: {reason}"]
+                        if current_venue == "BONDING":
+                            diag_parts.append("bonding curve 卖出失败，可能是池子已迁移或流动性不足")
+                        elif current_venue == "FLAP":
+                            diag_parts.append("flap 卖出失败，可能已毕业切换到 PancakeSwap")
+                        else:
+                            diag_parts.append("PancakeSwap 卖出失败，可能是流动性不足或滑点过高")
+                        notify_sell_failed(cfg, name, addr, " | ".join(diag_parts))
 
                 time.sleep(1)  # 避免 RPC 限流
 
