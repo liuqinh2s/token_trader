@@ -3303,6 +3303,11 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 should_sell, reason, tp_state, sell_ratio = check_sell_conditions(
                     pos_updated, current_price, cfg, momentum=None)
 
+                # 分段止盈状态必须在卖出前更新，否则卖出失败时会死循环
+                # 回撤止盈是清仓操作，失败后需要重试，所以状态在卖出成功后更新
+                if tp_state["tp_step_count"] != pos.get("tp_step_count", 0):
+                    update_position_tp_state(conn, pos["id"], tp_state)
+
                 if should_sell:
                     log.info("触发卖出 %s: %s (卖出比例: %.2f%%)", name, reason, sell_ratio * 100)
                     # 检测当前实际交易场所 (可能已从 bonding curve 迁移到 PancakeSwap)
@@ -3333,8 +3338,9 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                                   bnb_price_usd=bnb_price)
 
                     if sell_result:
-                        # 卖出成功后才更新止盈状态
-                        update_position_tp_state(conn, pos["id"], tp_state)
+                        # 回撤止盈状态在卖出成功后更新（清仓操作，失败需重试）
+                        if tp_state.get("trailing_tp_active") != pos.get("trailing_tp_active", 0):
+                            update_position_tp_state(conn, pos["id"], tp_state)
                         
                         if sell_ratio >= 1.0:
                             # 清仓，验证链上余额确认代币确实被卖出
