@@ -149,28 +149,15 @@ def _maybe_clean_logs() -> None:
 # 启动时清理一次
 _maybe_clean_logs()
 
-# 配置日志：控制台输出所有日志，文件只记录WARNING及以上级别
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)  # 根日志器设为DEBUG允许所有日志通过
-
-# 控制台处理器：INFO及以上级别（显示所有日志）
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-))
-
-# 文件处理器：WARNING及以上级别（精简文件大小）
-file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
-file_handler.setLevel(logging.WARNING)
-file_handler.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-))
-
-root_logger.addHandler(console_handler)
-root_logger.addHandler(file_handler)
+logging.basicConfig(
+    level=logging.WARNING,  # 降低日志级别从 INFO 到 WARNING，减少日志量
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+    ],
+)
 log = logging.getLogger(__name__)
 
 try:
