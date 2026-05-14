@@ -184,7 +184,8 @@ FM_MANAGER_ABI = json.loads("""[
     "type":"function","stateMutability":"nonpayable",
     "inputs":[
       {"name":"token","type":"address"},
-      {"name":"amount","type":"uint256"}
+      {"name":"amount","type":"uint256"},
+      {"name":"bonusAmount","type":"uint256"}
     ],"outputs":[]
   }
 ]""")
@@ -825,6 +826,80 @@ def fm_get_token_info(token_address: str) -> dict | None:
         return None
 
 
+def fm_try_sell(token_address: str, amount: int) -> dict | None:
+    """
+    通过 Helper3 预估 four.meme 卖出结果。
+    返回: {"tokenManager", "quote", "funds", "fee", "netFunds"} 或 None
+    """
+    if not _w3 or amount <= 0:
+        return None
+    try:
+        helper = _w3.eth.contract(address=FM_HELPER_V3, abi=FM_HELPER_ABI)
+        token_cs = Web3.to_checksum_address(token_address)
+        est = helper.functions.trySell(token_cs, amount).call()
+        funds = int(est[2] or 0)
+        fee = int(est[3] or 0)
+        return {
+            "tokenManager": est[0],
+            "quote": est[1],
+            "funds": funds,
+            "fee": fee,
+            "netFunds": max(0, funds - fee),
+        }
+    except Exception as e:
+        log.debug("fm_try_sell [%s amount=%s]: %s", token_address[:16], amount, e)
+        return None
+
+
+def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
+                               balance: int, token_name: str = "") -> int | None:
+    """
+    four.meme 小额分段止盈可能低于平台最小可交易/最小费用要求而 revert。
+    先模拟目标卖出额；若不可执行，则在当前余额内寻找最小可执行数量。
+    """
+    if desired_amount <= 0 or balance <= 0:
+        return None
+
+    desired_amount = min(desired_amount, balance)
+    est = fm_try_sell(token_address, desired_amount)
+    if est and est["netFunds"] > 0:
+        return desired_amount
+
+    # 先按倍数快速放大，避免对明显过小的 10% 分段直接发失败交易。
+    low = desired_amount + 1
+    high = None
+    probe = desired_amount
+    while probe < balance:
+        probe = min(balance, max(probe + 1, probe * 2))
+        est = fm_try_sell(token_address, probe)
+        if est and est["netFunds"] > 0:
+            high = probe
+            break
+        low = probe + 1
+
+    if high is None:
+        log.warning("分段止盈预检失败，当前余额内找不到可执行卖出数量: %s, 目标=%d, 余额=%d",
+                    token_name or token_address[:16], desired_amount, balance)
+        return None
+
+    # 二分找到最小可执行数量，尽量少偏离“卖出10%剩余持仓”的策略。
+    left, right = low, high
+    best = high
+    while left <= right:
+        mid = (left + right) // 2
+        est = fm_try_sell(token_address, mid)
+        if est and est["netFunds"] > 0:
+            best = mid
+            right = mid - 1
+        else:
+            left = mid + 1
+
+    if best > desired_amount:
+        log.info("分段止盈卖出数量已按 four.meme 最小可执行额调整 %s: %d → %d",
+                 token_name or token_address[:16], desired_amount, best)
+    return best
+
+
 def _check_pancake_liquidity(token_address: str) -> bool:
     """
     检查代币在 PancakeSwap 上是否有流动性 (通过 Router 询价)
@@ -1188,6 +1263,18 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         quote_addr = (info.get("quote") or "").lower()
         is_usdt_quote = (quote_addr == USDT.lower())
 
+        sell_est = fm_try_sell(token_address, amount)
+        if sell_est and sell_est["netFunds"] <= 0:
+            log.error("bonding curve 卖出预检失败或回款为 0: %s, amount=%d",
+                      token_name or token_address[:16], amount)
+            return None
+        if sell_est:
+            log.info("bonding curve 预估卖出: %s 代币 → funds=%d fee=%d quote=%s",
+                     amount, sell_est["funds"], sell_est["fee"], sell_est["quote"])
+        else:
+            log.warning("bonding curve 卖出预估失败，继续按原流程执行: %s, amount=%d",
+                        token_name or token_address[:16], amount)
+
         # Approve TokenManager
         allowance = token_contract.functions.allowance(
             _wallet_address, manager_cs
@@ -1224,6 +1311,7 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         tx = manager.functions.sellToken(
             token_cs,
             amount,
+            0,
         ).build_transaction({
             "from": _wallet_address,
             "gas": DEFAULT_GAS_SWAP,
@@ -3203,13 +3291,31 @@ def monitor_positions(cfg_loader, bnb_price_func):
                     total_amount = int(pos.get("buy_amount", 0))
                     
                     # 获取链上当前余额作为参考
-                    token_cs = Web3.to_checksum_address(addr)
-                    token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
-                    current_balance = token_contract.functions.balanceOf(_wallet_address).call()
+                    try:
+                        token_cs = Web3.to_checksum_address(addr)
+                        token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                        current_balance = token_contract.functions.balanceOf(_wallet_address).call()
+                    except Exception as e_bal:
+                        log.error("获取链上余额失败 %s: %s", name, e_bal)
+                        continue
                     
                     if is_step_tp:
                         # 分段止盈：卖出指定比例
-                        sell_amount = int(current_balance * sell_ratio)
+                        sell_amount = current_balance * int(sell_ratio * 10000) // 10000
+                        # 检查卖出数量是否过小
+                        if sell_amount <= 0:
+                            log.warning("分段止盈卖出数量过小，跳过 %s: 余额 %d, 比例 %.1f%%, 计算结果 %d",
+                                        name, current_balance, sell_ratio * 100, sell_amount)
+                            continue
+                        if current_venue == "BONDING":
+                            adjusted_amount = fm_adjust_step_sell_amount(
+                                addr, sell_amount, current_balance, name)
+                            if adjusted_amount is None:
+                                notify_sell_failed(
+                                    cfg, name, addr,
+                                    f"分段止盈卖出数量低于 four.meme 可执行最小额，已跳过 (目标数量 {sell_amount}, 余额 {current_balance})")
+                                continue
+                            sell_amount = adjusted_amount
                     else:
                         # 其他止盈/止损：全部卖出
                         sell_amount = None  # None 表示全部
