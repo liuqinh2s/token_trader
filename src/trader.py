@@ -2454,6 +2454,45 @@ def get_momentum_history(conn: sqlite3.Connection, position_id: int,
     return [dict(r) for r in reversed(rows)]  # 升序返回
 
 
+def record_partial_sell(conn: sqlite3.Connection, position_id: int,
+                        sell_price_usd: float, sell_amount: int,
+                        sell_tx: str, sell_reason: str):
+    """记录部分卖出，更新剩余持仓"""
+    pos = conn.execute("SELECT remaining_amount, buy_amount, token_decimals, buy_price_usd FROM positions WHERE id = ?",
+                      (position_id,)).fetchone()
+    if not pos:
+        return
+
+    remaining_str, buy_amount_str, decimals, buy_price = pos
+    # 如果 remaining_amount 为空，使用 buy_amount 作为初始值
+    remaining = int(remaining_str) if remaining_str else (int(buy_amount_str) if buy_amount_str else 0)
+
+    new_remaining = remaining - sell_amount
+    if new_remaining <= 0:
+        # 清仓了
+        close_position(conn, position_id, sell_price_usd, sell_tx, sell_reason, buy_price)
+    else:
+        # 部分卖出，更新剩余数量
+        now_ms = int(time.time() * 1000)
+        conn.execute("""
+            UPDATE positions SET
+                remaining_amount = ?,
+                current_price = ?,
+                sell_time = COALESCE(sell_time, ?),
+                sell_tx = COALESCE(sell_tx, ?),
+                sell_reason = ?
+            WHERE id = ?
+        """, (
+            str(new_remaining),
+            sell_price_usd,
+            now_ms,
+            sell_tx,
+            sell_reason,
+            position_id
+        ))
+        conn.commit()
+
+
 def calc_momentum_signals(history: list[dict]) -> dict:
     """
     根据动能历史计算衰竭信号
@@ -2621,10 +2660,10 @@ def detect_scam_signals(history: list[dict], buy_time: int) -> dict:
 # ===================================================================
 def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
-                          momentum: dict | None = None) -> tuple[bool, str, dict]:
+                          momentum: dict | None = None) -> tuple[bool, str, dict, float]:
     """
     检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 固定止损 + 超期清仓)
-    返回: (是否应该卖出, 卖出原因, 更新的止盈状态)
+    返回: (是否应该卖出, 卖出原因, 更新的止盈状态, 卖出比例 0.0-1.0)
 
     新止盈策略:
       1. 分段止盈: 每累计涨 tp_step_pct (默认10%) 卖出剩余持仓的 tp_step_pct (默认10%)
@@ -2670,13 +2709,14 @@ def check_sell_conditions(pos: dict, current_price: float,
     }
 
     if buy_price <= 0:
-        return False, "", tp_state
+        return False, "", tp_state, 0.0
 
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else 0
 
     sell_reason = ""
     should_sell = False
+    sell_ratio = 0.0
 
     if trailing_tp_triggered == 1 and step_tp_reset_price > 0 and max_price > step_tp_reset_price:
         tp_state["trailing_tp_triggered"] = 0
@@ -2701,7 +2741,7 @@ def check_sell_conditions(pos: dict, current_price: float,
 
         if triggered_step > tp_state["tp_step_count"]:
             sell_pct = tp_step_pct
-            sell_amount = tp_step_pct / 100
+            sell_ratio = tp_step_pct / 100
             sell_reason = (f"STEP_TP_{triggered_step} (分段止盈#{triggered_step}: "
                           f"累计涨幅 {max_profit_pct:.1f}%, 触发 (1+{tp_step_pct}%)^{triggered_step} 止盈线, "
                           f"卖出持仓 {sell_pct}%)")
@@ -2720,6 +2760,7 @@ def check_sell_conditions(pos: dict, current_price: float,
             if profit_pct <= retrace_threshold:
                 tp_state["trailing_tp_count"] += 1
                 sell_pct = tp_retrace_sell_pct
+                sell_ratio = tp_retrace_sell_pct / 100
                 if tp_state["trailing_tp_count"] == 1:
                     sell_reason = (f"TRAILING_TP_1 (回撤止盈#1: 最高盈利 {max_profit_pct:.1f}%, "
                                   f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, 卖出持仓 {sell_pct}%)")
@@ -2734,20 +2775,20 @@ def check_sell_conditions(pos: dict, current_price: float,
                 should_sell = True
 
     if should_sell:
-        return True, sell_reason, tp_state
+        return True, sell_reason, tp_state, sell_ratio
 
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
     hold_hours = hold_ms / (3600 * 1000)
 
     expire_loss_hours = trading_cfg.get("expire_loss_hours", 24)
     if hold_hours >= expire_loss_hours and profit_pct < 0:
-        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", tp_state
+        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", tp_state, 1.0
 
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
     if profit_pct <= stop_loss_pct:
-        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), tp_state
+        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), tp_state, 1.0
 
-    return False, "", tp_state
+    return False, "", tp_state, 0.0
 
 
 # ===================================================================
@@ -3272,13 +3313,13 @@ def monitor_positions(cfg_loader, bnb_price_func):
 
                 # 检查卖出条件
                 pos_updated = {**pos, "max_price_usd": max_price}
-                should_sell, reason, tp_state = check_sell_conditions(
+                should_sell, reason, tp_state, sell_ratio = check_sell_conditions(
                     pos_updated, current_price, cfg, momentum=None)
 
                 update_position_tp_state(conn, pos["id"], tp_state)
 
                 if should_sell:
-                    log.info("触发卖出 %s: %s", name, reason)
+                    log.info("触发卖出 %s: %s (卖出比例: %.2f%%)", name, reason, sell_ratio * 100)
                     # 检测当前实际交易场所 (可能已从 bonding curve 迁移到 PancakeSwap)
                     current_venue = detect_venue(addr, source_hint=pos.get("source", ""))
                     # UNKNOWN 时回退到持仓记录的 venue (买入时确定的通道更可靠)
@@ -3287,37 +3328,51 @@ def monitor_positions(cfg_loader, bnb_price_func):
                         log.warning("detect_venue 返回 UNKNOWN, 回退到持仓记录 venue=%s: %s",
                                     fallback_venue, name)
                         current_venue = fallback_venue
+                    # 计算要卖出的数量
+                    total_amount = int(pos.get("remaining_amount", pos.get("buy_amount", 0)))
+                    sell_amount = int(total_amount * sell_ratio)
+
                     if current_venue == "BONDING":
-                        sell_result = fm_sell_token(addr, token_name=name,
+                        sell_result = fm_sell_token(addr, amount=sell_amount,
+                                                    token_name=name,
                                                     bnb_price_usd=bnb_price)
                     elif current_venue == "FLAP":
-                        sell_result = flap_sell_token(addr, token_name=name,
+                        sell_result = flap_sell_token(addr, amount=sell_amount,
+                                                      token_name=name,
                                                       bnb_price_usd=bnb_price)
                     else:
-                        sell_result = sell_token(addr, slippage_pct=slippage,
-                                                 token_name=name,
-                                                 bnb_price_usd=bnb_price)
-                    if sell_result:
-                        # 验证链上余额确认代币确实被卖出
-                        try:
-                            token_cs = Web3.to_checksum_address(addr)
-                            token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
-                            remaining = token_contract.functions.balanceOf(_wallet_address).call()
-                            if remaining > 0:
-                                decimals = token_contract.functions.decimals().call()
-                                remaining_amount = remaining / (10 ** decimals)
-                                remaining_value = remaining_amount * current_price
-                                if remaining_value > 0.5:
-                                    log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
-                                                name, remaining_amount, remaining_value)
-                                    notify_sell_failed(cfg, name, addr,
-                                                       f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
-                                    continue
-                        except Exception as e_check:
-                            log.debug("卖出后余额检查异常 %s: %s", name, e_check)
+                        # PancakeSwap 支持部分卖出
+                        sell_result = sell_token(addr, amount=sell_amount,
+                                                 slippage_pct=slippage,
+                                                  token_name=name,
+                                                  bnb_price_usd=bnb_price)
 
-                        close_position(conn, pos["id"], current_price,
-                                       sell_result["tx_hash"], reason, buy_price)
+                    if sell_result:
+                        if sell_ratio >= 1.0:
+                            # 清仓，验证链上余额确认代币确实被卖出
+                            try:
+                                token_cs = Web3.to_checksum_address(addr)
+                                token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                                remaining = token_contract.functions.balanceOf(_wallet_address).call()
+                                if remaining > 0:
+                                    decimals = token_contract.functions.decimals().call()
+                                    remaining_amount = remaining / (10 ** decimals)
+                                    remaining_value = remaining_amount * current_price
+                                    if remaining_value > 0.5:
+                                        log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
+                                                    name, remaining_amount, remaining_value)
+                                        notify_sell_failed(cfg, name, addr,
+                                                           f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
+                                        continue
+                            except Exception as e_check:
+                                log.debug("卖出后余额检查异常 %s: %s", name, e_check)
+
+                            close_position(conn, pos["id"], current_price,
+                                           sell_result["tx_hash"], reason, buy_price)
+                        else:
+                            # 部分卖出，记录剩余持仓
+                            record_partial_sell(conn, pos["id"], current_price,
+                                                sell_amount, sell_result["tx_hash"], reason)
                         pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
                         notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
                                     buy_price=buy_price, max_price=max_price,
