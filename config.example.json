@@ -35,8 +35,6 @@
         "min_buy_usd": 1,
         "max_buy_usd": 10,
         "tp_step_pct": 10,
-        "tp_retrace_pct": 50,
-        "tp_retrace_sell_pct": 50,
         "expire_loss_hours": 24,
         "expire_underperform_hours": 48,
         "expire_min_profit_pct": 100,
