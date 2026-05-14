@@ -2685,17 +2685,13 @@ def check_sell_conditions(pos: dict, current_price: float,
       2. 回撤止盈: 盈利 >= 15% 开始计算
          - 15% <= 盈利 < 30%: 回撤 15% 止盈 (如 20%→5%)
          - 盈利 >= 30%: 回撤 50% 止盈 (中点，如 50%→25%)
-      3. 激活: 触发一次分段止盈后激活回撤止盈
-      4. 清仓: 剩余仓位价值 < 初始价值 10%
+      3. 固定止损: 亏损 -25%
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
     trading_cfg = cfg.get("trading", {})
     buy_price = pos["buy_price_usd"]
     max_price = pos["max_price_usd"] or 0
-    initial_value = pos.get("initial_position_value_usd", 0)
-    remaining_amount = int(pos.get("remaining_amount", pos.get("buy_amount", 0)))
-    decimals = pos.get("token_decimals", 18)
 
     tp_step_pct = trading_cfg.get("tp_step_pct", 10)
     tp_retrace_sell_pct = trading_cfg.get("tp_retrace_sell_pct", 50)
@@ -2710,7 +2706,7 @@ def check_sell_conditions(pos: dict, current_price: float,
         "step_tp_reset_price": 0,
         "trailing_tp_count": 0,
         "trailing_tp_base_profit": 0,
-        "initial_position_value_usd": initial_value,
+        "initial_position_value_usd": 0,
     }
 
     if buy_price <= 0:
@@ -2718,11 +2714,6 @@ def check_sell_conditions(pos: dict, current_price: float,
 
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else 0
-
-    remaining_value = (remaining_amount / (10 ** decimals)) * current_price
-
-    if initial_value > 0 and remaining_value <= initial_value * 0.1:
-        return True, f"MIN_VALUE_SELL (剩余价值 ${remaining_value:.2f} < 初始 ${initial_value:.2f} 的 10%)", tp_state, 1.0
 
     sell_reason = ""
     should_sell = False
