@@ -1238,9 +1238,9 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         manager = _w3.eth.contract(address=manager_cs, abi=FM_MANAGER_ABI)
         nonce = _w3.eth.get_transaction_count(_wallet_address)
         gas_price = _w3.eth.gas_price
-        min_gas_price = Web3.to_wei(1, "gwei")
+        min_gas_price = Web3.to_wei(5, "gwei")
         if gas_price < min_gas_price:
-            log.warning("bonding curve 卖出: gas price %.1f Gwei 太低, 提升到 1 Gwei", 
+            log.warning("bonding curve 卖出: gas price %.1f Gwei 太低, 提升到 5 Gwei", 
                        float(Web3.from_wei(gas_price, "gwei")))
             gas_price = min_gas_price
         tx = manager.functions.sellToken(
