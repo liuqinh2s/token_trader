@@ -351,6 +351,15 @@ def _init_positions_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE positions ADD COLUMN created_at INTEGER DEFAULT 0")
     except Exception:
         pass  # 列已存在
+    # 迁移: 添加分段止盈相关列
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN tp_step_base_price REAL DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN tp_step_count INTEGER DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     # 动能跟踪表: 记录每个持仓的持币数/流动性/进度历史
     conn.execute("""
         CREATE TABLE IF NOT EXISTS momentum (
@@ -2251,8 +2260,9 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
     conn.execute("""
         INSERT INTO positions
             (token_address, token_name, token_decimals, buy_price_usd, buy_amount,
-             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
+             buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue, channel, created_at,
+             tp_step_base_price, tp_step_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
     """, (
         token_address.lower(),
         token_name,
@@ -2267,6 +2277,8 @@ def record_buy(conn: sqlite3.Connection, token_address: str, token_name: str,
         buy_result.get("venue", "PANCAKE"),
         channel,
         created_at,
+        buy_result["buy_price_usd"],  # tp_step_base_price 初始 = buy_price
+        0,  # tp_step_count 初始 = 0
     ))
     conn.commit()
 
@@ -2572,29 +2584,42 @@ def detect_scam_signals(history: list[dict], buy_time: int) -> dict:
 # ===================================================================
 def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
-                          momentum: dict | None = None) -> tuple[bool, str]:
+                          momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
-    检查是否满足卖出条件 (回撤止盈 + 中点止盈 + 固定止损 + 超期清仓)
-    返回: (是否应该卖出, 卖出原因)
+    检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 中点止盈 + 固定止损 + 超期清仓)
+    返回: (是否应该卖出, 卖出原因, 是否是分段止盈, 要卖出的比例 (0-1))
 
     策略:
-      1. 回撤止盈: 盈利达到 tp_trigger_pct 后触发跟踪
+      1. 分段止盈: 每涨10%就卖出剩余持仓的10%
+         - 第一次: 从买入价涨10% → 卖10%
+         - 第二次: 从第一次止盈价再涨10% → 卖剩余的10%
+         - 依此类推
+      2. 回撤止盈: 盈利达到 tp_trigger_pct 后触发跟踪
          - 触发~tp_midpoint_pct 区间: 从最高价回撤 tp_drawdown_pct 即卖出
          - tp_midpoint_pct 以上: 中点止盈法, 价格 ≤ (最高价 + 买入价) / 2
-      2. 固定止损: 亏损 25% 止损
-      3. 超期清仓: 持仓超过 24h 且亏损 → 卖出
+      3. 固定止损: 亏损 25% 止损
+      4. 超期清仓: 持仓超过 24h 且亏损 → 卖出
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
     trading_cfg = cfg.get("trading", {})
     buy_price = pos["buy_price_usd"]
     max_price = pos["max_price_usd"] or 0
+    tp_step_base_price = pos.get("tp_step_base_price", 0) or buy_price
+    tp_step_count = pos.get("tp_step_count", 0) or 0
 
     if buy_price <= 0:
-        return False, ""
+        return False, "", False, 0.0
 
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else 0
+    step_profit_pct = (current_price - tp_step_base_price) / tp_step_base_price * 100
+
+    # ==================== 策略0: 分段止盈 ====================
+    tp_step_threshold = trading_cfg.get("tp_step_pct", 10)
+    if step_profit_pct >= tp_step_threshold:
+        return True, (f"STEP_TP (分段止盈: 第{tp_step_count+1}次, 基准价 ${tp_step_base_price:.12f}, "
+                      f"当前 ${current_price:.12f} (+{step_profit_pct:.1f}%), 卖出10%剩余持仓)"), True, 0.1
 
     # ==================== 策略1: 回撤止盈 ====================
     tp_trigger_pct = trading_cfg.get("tp_trigger_pct", 15)
@@ -2610,7 +2635,7 @@ def check_sell_conditions(pos: dict, current_price: float,
                 mid_pct = (midpoint - buy_price) / buy_price * 100
                 return True, (f"MIDPOINT_TP (中点止盈: 最高盈利 {max_profit_pct:.0f}%, "
                               f"中点 ${midpoint:.12f} ({mid_pct:.0f}%), "
-                              f"当前 ${current_price:.12f} ({profit_pct:.0f}%))")
+                              f"当前 ${current_price:.12f} ({profit_pct:.0f}%))"), False, 1.0
         else:
             # 15%~30%: 回撤止盈
             drawdown_price = max_price * (1 - tp_drawdown_pct / 100)
@@ -2618,7 +2643,7 @@ def check_sell_conditions(pos: dict, current_price: float,
                 sell_at_pct = (drawdown_price - buy_price) / buy_price * 100
                 return True, (f"TRAILING_TP (回撤止盈: 最高盈利 {max_profit_pct:.0f}%, "
                               f"回撤{tp_drawdown_pct}%线 ${drawdown_price:.12f} ({sell_at_pct:.0f}%), "
-                              f"当前 ${current_price:.12f} ({profit_pct:.0f}%))")
+                              f"当前 ${current_price:.12f} ({profit_pct:.0f}%))"), False, 1.0
 
     # ==================== 策略2: 超期清仓 ====================
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
@@ -2626,15 +2651,15 @@ def check_sell_conditions(pos: dict, current_price: float,
 
     expire_loss_hours = trading_cfg.get("expire_loss_hours", 24)
     if hold_hours >= expire_loss_hours and profit_pct < 0:
-        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)"
+        return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", False, 1.0
 
     # ==================== 策略3: 固定止损 ====================
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
 
     if profit_pct <= stop_loss_pct:
-        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)")
+        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), False, 1.0
 
-    return False, ""
+    return False, "", False, 0.0
 
 
 # ===================================================================
@@ -3159,7 +3184,7 @@ def monitor_positions(cfg_loader, bnb_price_func):
 
                 # 检查卖出条件
                 pos_updated = {**pos, "max_price_usd": max_price}
-                should_sell, reason = check_sell_conditions(
+                should_sell, reason, is_step_tp, sell_ratio = check_sell_conditions(
                     pos_updated, current_price, cfg, momentum=None)
 
                 if should_sell:
@@ -3172,41 +3197,81 @@ def monitor_positions(cfg_loader, bnb_price_func):
                         log.warning("detect_venue 返回 UNKNOWN, 回退到持仓记录 venue=%s: %s",
                                     fallback_venue, name)
                         current_venue = fallback_venue
+                    
+                    # 获取要卖出的数量
+                    decimals = pos.get("token_decimals", 18)
+                    total_amount = int(pos.get("buy_amount", 0))
+                    
+                    # 获取链上当前余额作为参考
+                    token_cs = Web3.to_checksum_address(addr)
+                    token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                    current_balance = token_contract.functions.balanceOf(_wallet_address).call()
+                    
+                    if is_step_tp:
+                        # 分段止盈：卖出指定比例
+                        sell_amount = int(current_balance * sell_ratio)
+                    else:
+                        # 其他止盈/止损：全部卖出
+                        sell_amount = None  # None 表示全部
+                    
                     if current_venue == "BONDING":
-                        sell_result = fm_sell_token(addr, token_name=name,
+                        sell_result = fm_sell_token(addr, amount=sell_amount, token_name=name,
                                                     bnb_price_usd=bnb_price)
                     elif current_venue == "FLAP":
-                        sell_result = flap_sell_token(addr, token_name=name,
+                        sell_result = flap_sell_token(addr, amount=sell_amount, token_name=name,
                                                       bnb_price_usd=bnb_price)
                     else:
-                        sell_result = sell_token(addr, slippage_pct=slippage,
+                        sell_result = sell_token(addr, amount=sell_amount, slippage_pct=slippage,
                                                  token_name=name,
                                                  bnb_price_usd=bnb_price)
                     if sell_result:
-                        # 验证链上余额确认代币确实被卖出
-                        try:
-                            token_cs = Web3.to_checksum_address(addr)
-                            token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
-                            remaining = token_contract.functions.balanceOf(_wallet_address).call()
-                            if remaining > 0:
-                                decimals = token_contract.functions.decimals().call()
-                                remaining_amount = remaining / (10 ** decimals)
-                                remaining_value = remaining_amount * current_price
-                                if remaining_value > 0.5:
-                                    log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
-                                                name, remaining_amount, remaining_value)
-                                    notify_sell_failed(cfg, name, addr,
-                                                       f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
-                                    continue
-                        except Exception as e_check:
-                            log.debug("卖出后余额检查异常 %s: %s", name, e_check)
+                        if is_step_tp:
+                            # 分段止盈：不关闭持仓，只更新分段止盈字段
+                            new_tp_step_base_price = current_price
+                            new_tp_step_count = (pos.get("tp_step_count", 0) or 0) + 1
+                            
+                            # 更新数据库
+                            conn.execute("""
+                                UPDATE positions 
+                                SET tp_step_base_price = ?, tp_step_count = ?
+                                WHERE id = ?
+                            """, (new_tp_step_base_price, new_tp_step_count, pos["id"]))
+                            conn.commit()
+                            
+                            log.info("分段止盈执行成功 %s: 第%d次, 新基准价 $%.12f", 
+                                     name, new_tp_step_count, new_tp_step_base_price)
+                            
+                            # 发送通知
+                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                                        buy_price=buy_price, max_price=max_price,
+                                        sell_price=current_price)
+                        else:
+                            # 其他止盈/止损：关闭持仓
+                            # 验证链上余额确认代币确实被卖出
+                            try:
+                                token_cs = Web3.to_checksum_address(addr)
+                                token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                                remaining = token_contract.functions.balanceOf(_wallet_address).call()
+                                if remaining > 0:
+                                    decimals = token_contract.functions.decimals().call()
+                                    remaining_amount = remaining / (10 ** decimals)
+                                    remaining_value = remaining_amount * current_price
+                                    if remaining_value > 0.5:
+                                        log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
+                                                    name, remaining_amount, remaining_value)
+                                        notify_sell_failed(cfg, name, addr,
+                                                           f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
+                                        continue
+                            except Exception as e_check:
+                                log.debug("卖出后余额检查异常 %s: %s", name, e_check)
 
-                        close_position(conn, pos["id"], current_price,
-                                       sell_result["tx_hash"], reason, buy_price)
-                        pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                        notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
-                                    buy_price=buy_price, max_price=max_price,
-                                    sell_price=current_price)
+                            close_position(conn, pos["id"], current_price,
+                                           sell_result["tx_hash"], reason, buy_price)
+                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                                        buy_price=buy_price, max_price=max_price,
+                                        sell_price=current_price)
                         # 诈骗开发者记录: 亏损 80%+ 的代币, 记录 creator 到黑名单
                         if pnl <= -80:
                             try:
@@ -3531,8 +3596,9 @@ def _sync_positions_from_wallet(bnb_price_usd: float):
             conn.execute("""
                 INSERT INTO positions
                     (token_address, token_name, token_decimals, buy_price_usd, buy_amount,
-                     buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?)
+                     buy_bnb, buy_tx, buy_time, max_price_usd, current_price, status, venue,
+                     tp_step_base_price, tp_step_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
             """, (
                 addr,
                 h["name"],
@@ -3545,6 +3611,8 @@ def _sync_positions_from_wallet(bnb_price_usd: float):
                 h["price_usd"],       # max_price = 当前价
                 h["price_usd"],
                 h["venue"],
+                h["price_usd"],       # tp_step_base_price = 当前价
+                0,                     # tp_step_count = 0
             ))
             log.info("同步: 新建持仓 %s, 当前价 $%.10f, 价值 $%.2f",
                      h["name"], h["price_usd"], h["value_usd"])
