@@ -1237,20 +1237,27 @@ def fm_sell_token(token_address: str, amount: int | None = None,
 
         manager = _w3.eth.contract(address=manager_cs, abi=FM_MANAGER_ABI)
         nonce = _w3.eth.get_transaction_count(_wallet_address)
+        gas_price = _w3.eth.gas_price
+        min_gas_price = Web3.to_wei(1, "gwei")
+        if gas_price < min_gas_price:
+            log.warning("bonding curve 卖出: gas price %.1f Gwei 太低, 提升到 1 Gwei", 
+                       float(Web3.from_wei(gas_price, "gwei")))
+            gas_price = min_gas_price
         tx = manager.functions.sellToken(
             token_cs,
             amount,
         ).build_transaction({
             "from": _wallet_address,
             "gas": DEFAULT_GAS_SWAP,
-            "gasPrice": _w3.eth.gas_price,
+            "gasPrice": gas_price,
             "nonce": nonce,
             "chainId": BSC_CHAIN_ID,
         })
 
         signed = _w3.eth.account.sign_transaction(tx, _private_key)
         tx_hash = _w3.eth.send_raw_transaction(signed.raw_transaction)
-        log.info("bonding curve 卖出 TX: %s", tx_hash.hex())
+        log.info("bonding curve 卖出 TX: %s (gas: %.1f Gwei)", tx_hash.hex(), 
+                float(Web3.from_wei(gas_price, "gwei")))
 
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         if receipt["status"] != 1:
