@@ -3296,8 +3296,6 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 should_sell, reason, tp_state, sell_ratio = check_sell_conditions(
                     pos_updated, current_price, cfg, momentum=None)
 
-                update_position_tp_state(conn, pos["id"], tp_state)
-
                 if should_sell:
                     log.info("触发卖出 %s: %s (卖出比例: %.2f%%)", name, reason, sell_ratio * 100)
                     # 检测当前实际交易场所 (可能已从 bonding curve 迁移到 PancakeSwap)
@@ -3328,6 +3326,9 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                                   bnb_price_usd=bnb_price)
 
                     if sell_result:
+                        # 卖出成功后才更新止盈状态
+                        update_position_tp_state(conn, pos["id"], tp_state)
+                        
                         if sell_ratio >= 1.0:
                             # 清仓，验证链上余额确认代币确实被卖出
                             try:
