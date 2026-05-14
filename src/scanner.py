@@ -150,12 +150,11 @@ def _maybe_clean_logs() -> None:
 _maybe_clean_logs()
 
 logging.basicConfig(
-    level=logging.WARNING,  # 降低日志级别从 INFO 到 WARNING，减少日志量
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
