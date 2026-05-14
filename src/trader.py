@@ -2759,8 +2759,8 @@ def check_sell_conditions(pos: dict, current_price: float,
 
             if profit_pct <= retrace_threshold:
                 tp_state["trailing_tp_count"] += 1
-                sell_pct = tp_retrace_sell_pct
-                sell_ratio = tp_retrace_sell_pct / 100
+                sell_pct = 100
+                sell_ratio = 1.0
                 if tp_state["trailing_tp_count"] == 1:
                     sell_reason = (f"TRAILING_TP_1 (回撤止盈#1: 最高盈利 {max_profit_pct:.1f}%, "
                                   f"回撤 {tp_retrace_pct}% 至 {profit_pct:.1f}%, 卖出持仓 {sell_pct}%)")
