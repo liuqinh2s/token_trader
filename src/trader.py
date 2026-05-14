@@ -60,6 +60,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
+from eth_abi import encode
+from eth_utils import function_signature_to_4byte_selector
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
@@ -184,8 +186,7 @@ FM_MANAGER_ABI = json.loads("""[
     "type":"function","stateMutability":"nonpayable",
     "inputs":[
       {"name":"token","type":"address"},
-      {"name":"amount","type":"uint256"},
-      {"name":"bonusAmount","type":"uint256"}
+      {"name":"amount","type":"uint256"}
     ],"outputs":[]
   }
 ]""")
@@ -900,6 +901,68 @@ def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
     return best
 
 
+def _build_contract_call_data(signature: str, arg_types: list[str], args: list) -> str:
+    selector = function_signature_to_4byte_selector(signature).hex()
+    encoded_args = encode(arg_types, args).hex()
+    return "0x" + selector + encoded_args
+
+
+def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
+                              token_name: str = "") -> dict | None:
+    """
+    four.meme TokenManager 有多个版本，卖出入口签名可能不同。
+    逐个用 eth_call/estimateGas 预检，选择当前 manager 真正可执行的 calldata。
+    """
+    if not _w3 or not _wallet_address or amount <= 0:
+        return None
+
+    candidates = [
+        ("saleToken(address,uint256)", ["address", "uint256"], [token_cs, amount]),
+        (
+            "sellToken(uint256,address,address,uint256,uint256,uint256,address)",
+            ["uint256", "address", "address", "uint256", "uint256", "uint256", "address"],
+            [0, token_cs, _wallet_address, amount, 0, 0, _wallet_address],
+        ),
+        ("sellToken(address,uint256)", ["address", "uint256"], [token_cs, amount]),
+        ("sellToken(address,uint256,uint256)", ["address", "uint256", "uint256"], [token_cs, amount, 0]),
+        ("sellToken(address,uint256,uint256,uint256)", ["address", "uint256", "uint256", "uint256"], [token_cs, amount, 0, 0]),
+    ]
+    gas_price = _w3.eth.gas_price
+    errors = []
+
+    for signature, arg_types, args in candidates:
+        data = _build_contract_call_data(signature, arg_types, args)
+        call_tx = {
+            "from": _wallet_address,
+            "to": manager_cs,
+            "data": data,
+            "value": 0,
+        }
+        try:
+            _w3.eth.call(call_tx)
+            gas_estimate = _w3.eth.estimate_gas(call_tx)
+            gas_limit = min(max(int(gas_estimate * 1.25), DEFAULT_GAS_SWAP), 1_200_000)
+            nonce = _w3.eth.get_transaction_count(_wallet_address)
+            log.info("four.meme 卖出入口预检通过 %s: %s, gas=%d",
+                     token_name or token_cs[:16], signature, gas_limit)
+            return {
+                "from": _wallet_address,
+                "to": manager_cs,
+                "data": data,
+                "value": 0,
+                "gas": gas_limit,
+                "gasPrice": gas_price,
+                "nonce": nonce,
+                "chainId": BSC_CHAIN_ID,
+            }
+        except Exception as e:
+            errors.append(f"{signature}: {e}")
+
+    log.error("four.meme 卖出入口全部预检失败 %s amount=%d: %s",
+              token_name or token_cs[:16], amount, " | ".join(errors))
+    return None
+
+
 def _check_pancake_liquidity(token_address: str) -> bool:
     """
     检查代币在 PancakeSwap 上是否有流动性 (通过 Router 询价)
@@ -1306,19 +1369,9 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         else:
             balance_before = _w3.eth.get_balance(_wallet_address)
 
-        manager = _w3.eth.contract(address=manager_cs, abi=FM_MANAGER_ABI)
-        nonce = _w3.eth.get_transaction_count(_wallet_address)
-        tx = manager.functions.sellToken(
-            token_cs,
-            amount,
-            0,
-        ).build_transaction({
-            "from": _wallet_address,
-            "gas": DEFAULT_GAS_SWAP,
-            "gasPrice": _w3.eth.gas_price,
-            "nonce": nonce,
-            "chainId": BSC_CHAIN_ID,
-        })
+        tx = fm_build_sell_transaction(manager_cs, token_cs, amount, token_name)
+        if tx is None:
+            return None
 
         signed = _w3.eth.account.sign_transaction(tx, _private_key)
         tx_hash = _w3.eth.send_raw_transaction(signed.raw_transaction)
