@@ -2235,9 +2235,9 @@
             <span class="flow-num">4</span>
             <div>
               <div class="flow-title">标签制精筛 (瞬时)</div>
-              <div class="flow-desc">统一通道，未毕业币和已毕业币走同一套标签制。基础标签全部满足(持币≥10/进度≥8%或流动性≥$5k/仿盘≥3/未崩盘/历史最大跌幅≤60%/社交≥1)
+              <div class="flow-desc">统一通道，未毕业币和已毕业币走同一套标签制。基础标签全部满足(波动充足/未崩盘/历史最大跌幅≤60%)
                 +
-                单动能触发(最近3轮内持币增长或价格上涨, 任一即可)</div>
+                加分项触发(成交额/流动性/进度/价格异动等，至少一项)</div>
             </div>
           </div>
         </div>
@@ -2272,19 +2272,14 @@
     <div class="about-section">
       <h3>✅ 精筛条件（标签制）</h3>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
-        核心思路：基础标签保证底线质量，单动能触发确认增长趋势。统一通道，未毕业币和已毕业币走同一套标签制，不再区分毕业通道。
+        核心思路：基础标签保证底线质量，加分项确认增长动能。统一通道，未毕业币和已毕业币走同一套标签制，不再区分毕业通道。
       </p>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;line-height:1.5;">
         <strong>基础标签（全部满足，AND）：</strong>
       </p>
       <ul class="about-list">
-        <li>持币数 ≥ 10</li>
-        <li>进度 ≥ 8%（未毕业）/ 流动性 ≥ $5k（已毕业）</li>
-        <li>仿盘数 ≥ 3</li>
-        <li>未崩盘（近三期最高点跌幅 &lt; 35%）</li>
-        <li>历史最大跌幅不超过 60%（快照最高价到最低价）</li>
-        <li>社交 ≥ 1</li>
-        <li>单动能：最近3轮内持币数有增长 或 价格有上涨（任一即可；首轮豁免：持币≥20 + 进度≥15%/流动性≥$5k）</li>
+        <li>波动充足：币龄 &gt; 8轮扫描时，近8轮价格（含本轮）两两之间至少一组涨幅 ≥ 10%；不足8轮时，用已记录的全部扫描价格检查同一要求</li>
+        <li>历史最大跌幅不超过 60%（完整价格历史中的最高价到最低价）</li>
       </ul>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
         大盘情绪（Gas指数）仍在每轮计算并记录，仅用于数据分析，不作为精筛阻断条件。
@@ -2668,6 +2663,12 @@
       let html = '';
       if (token.is_quality_deployer) {
         html += '<span class="tag tag-boost" title="该开发者曾发过10倍以上涨幅代币">⭐优质开发者</span>';
+      }
+      // 基础标签 (base_tags)
+      if (token.base_tags && token.base_tags.length > 0) {
+        for (const bt of token.base_tags) {
+          html += `<span class="tag tag-bonus-good" title="基础标签">${esc(bt)}</span>`;
+        }
       }
       // 加分标签 (bonus_tags)
       if (token.bonus_tags && token.bonus_tags.length > 0) {
@@ -3142,6 +3143,7 @@ function renderData(data) {
           is_copycat: t.ic || false, total_supply: t.ts, day1_vol: t.dv,
           progress: t.pg, liquidity: t.lq || 0, raised_amount: t.ra || 0,
           market_cap: t.mc || 0, wallet_signals: t.ws || [], _scanTime: t.st,
+          base_tags: t.btg || [], bonus_tags: t.bnt || [],
           _source: t.src || 'filtered',
           reason: t.rsn || '',
           peak_price: t.pp || t.mp || 0,

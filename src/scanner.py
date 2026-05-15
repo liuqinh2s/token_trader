@@ -375,9 +375,11 @@ TAG_VOLUME_TIERS = [
     (44.0, 30000),  # ≥44h:    ≥$30000
 ]
 
-# --- 基础标签: 波动充足 (近3轮振幅有至少一根≥20%) ---
-TAG_AMPLITUDE_MIN_RATIO = 0.20    # 振幅 ≥ 20%
-TAG_AMPLITUDE_WINDOW = 3          # 检测最近3轮
+# --- 基础标签: 波动充足 (加分项前硬筛) ---
+# 近8轮扫描价格(含本轮)两两之间，至少有一组后价相对前价涨幅 ≥10%。
+# 若可用扫描不足8轮，则用全部可用扫描价格检查同一要求。
+TAG_VOLATILITY_MIN_GAIN = 0.10    # 任意一组价格涨幅 ≥ 10%
+TAG_VOLATILITY_WINDOW = 8         # 检测最近8轮
 
 # --- 基础标签: 趋势向上 (当前价格 ≥ 4轮前价格) ---
 TAG_TREND_WINDOW = 4              # 检测最近4轮 (≈1h)
@@ -3972,16 +3974,28 @@ def elimination_check(queue: list[dict], now_ms: int,
             # 更新 Boost 信息 (项目方付费推广, 正向信号, 零额外 API 调用)
             t["boosts"] = ds.get("boosts", 0)
 
+        # 更新扫描轮数 (用于按真实观察轮次判断基础标签)
+        prev_scan_count = t.get("scanCount")
+        try:
+            prev_scan_count = int(prev_scan_count)
+        except (TypeError, ValueError):
+            prev_scan_count = None
+        if prev_scan_count is None:
+            t["scanCount"] = len(t.get("priceHistory", [])) + 1
+        else:
+            is_new_this_scan = now_ms - t.get("addedAt", 0) <= 60000 and prev_scan_count <= 1
+            t["scanCount"] = 1 if is_new_this_scan else max(prev_scan_count, 0) + 1
+
         # 更新峰值 (仅用 DexScreener 实时价)
         t["peakPrice"] = max(t.get("peakPrice", 0), current_price)
         t["peakHolders"] = max(t.get("peakHolders", 0), current_holders)
         t["peakLiquidity"] = max(t.get("peakLiquidity", 0), current_liq)
         t["peakProgress"] = max(t.get("peakProgress", 0), current_progress)
 
-        # 记录价格历史 (只保留最近 5 轮, 与 holdersHistory 对齐)
+        # 记录完整价格历史: 48h队列窗口内约192个点/币，供历史最大跌幅和生命周期回看使用
         price_hist = t.get("priceHistory", [])
         price_hist.append(current_price)
-        t["priceHistory"] = price_hist[-5:]
+        t["priceHistory"] = price_hist
 
         # 记录进度历史 (只保留最近 5 轮, 与 priceHistory 对齐)
         prog_hist = t.get("progressHistory", [])
@@ -4483,6 +4497,46 @@ def _check_progress_limit(prog_hist: list[float]) -> tuple[bool, str]:
     return True, ""
 
 
+def _check_sufficient_volatility(price_hist: list[float], scan_count: int | None = None) -> tuple[bool, str]:
+    """
+    基础标签: 波动充足
+
+    - 币龄 > 8轮扫描: 只看最近8轮扫描价格(包含本轮)
+    - 币龄不足8轮扫描: 使用全部扫描价格
+    - 窗口内任意一组按时间先后排列的价格，后价相对前价涨幅 >= 10% 即通过
+
+    返回: (是否通过, 失败原因)
+    """
+    if not price_hist:
+        return False, "无价格历史"
+
+    if scan_count is None or scan_count <= 0:
+        scan_count = len(price_hist)
+
+    required_window = TAG_VOLATILITY_WINDOW if scan_count > TAG_VOLATILITY_WINDOW else scan_count
+    window = price_hist[-required_window:] if required_window > 0 else price_hist
+    valid_window = [p for p in window if p and p > 0]
+    if len(valid_window) < required_window:
+        return False, f"有效价格历史不足{required_window}轮"
+    if len(valid_window) < 2:
+        return False, "价格历史不足2轮"
+
+    best_gain = 0.0
+    for i, base_price in enumerate(valid_window[:-1]):
+        if base_price <= 0:
+            continue
+        for later_price in valid_window[i + 1:]:
+            if later_price <= 0:
+                continue
+            gain = (later_price - base_price) / base_price
+            if gain > best_gain:
+                best_gain = gain
+            if gain >= TAG_VOLATILITY_MIN_GAIN:
+                return True, ""
+
+    return False, f"近{len(valid_window)}轮最大涨幅{best_gain*100:.1f}%<{TAG_VOLATILITY_MIN_GAIN*100:.0f}%"
+
+
 def _check_limit_conditions(t: dict) -> tuple[bool, str]:
     """
     限制条件总入口 (加分前必查, 任一不满足直接拒绝)
@@ -4541,7 +4595,10 @@ def tag_filter(candidates: list[dict], now_ms: int,
         * 近1~4轮整体进度涨幅均≤50个百分点
         * 近1~8轮整体进度跌幅均≤15个百分点
 
-    加分标签 (通过限制条件后, 至少一项才开仓):
+    基础标签 (通过限制条件后、加分标签前必查):
+      - 波动充足: 近8轮扫描价格(含本轮)两两之间至少一组涨幅≥10%; 不足8轮则用全部扫描
+
+    加分标签 (通过基础标签后, 至少一项才开仓):
       - 小涨跌不动: 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h
       - 成交额异动: 阳线 + 成交额≥前6根之和(不足6根归一化) + 涨幅≤50% + 增量≥500u
         * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
@@ -4572,6 +4629,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
         current_price = t.get("price", 0)
         if current_price <= 0:
             continue
+        t["_base_tags"] = []
 
         holders = t.get("holders", 0)
         name = t.get("name") or addr[:16]
@@ -4591,6 +4649,15 @@ def tag_filter(candidates: list[dict], now_ms: int,
         if not limit_passed:
             log.info("限制条件: ✗ %s — %s", name, limit_reason)
             continue
+
+        # ==================== 基础标签检查 (加分项前硬筛) ====================
+        volatility_passed, volatility_reason = _check_sufficient_volatility(
+            price_hist, t.get("scanCount")
+        )
+        if not volatility_passed:
+            log.info("基础标签: ✗ %s — 波动充足未通过 (%s)", name, volatility_reason)
+            continue
+        t["_base_tags"] = ["波动充足"]
 
         # ==================== 加分标签计算 ====================
         bonus_score = 0
@@ -5125,6 +5192,7 @@ def fetch_scanner_quality_tokens() -> tuple[list[dict], str]:
                 "sellsH1": t.get("sells_h1", 0),
                 "buysH24": t.get("buys_h24", 0),
                 "sellsH24": t.get("sells_h24", 0),
+                "_base_tags": t.get("base_tags", []),
                 "_bonus_score": t.get("bonus_score", 0),
                 "_bonus_tags": t.get("bonus_tags", []),
                 "_from_scanner": True,  # 标记来源
@@ -5302,6 +5370,7 @@ def scan_once(cfg: dict) -> dict:
                 "day1Vol": detail.get("day1Vol", 0),
                 "consecDrops": 0,
                 "lastPrice": detail["price"],
+                "scanCount": 1,
                 "priceHistory": [detail["price"]],
                 "holdersHistory": [detail["holders"]],
                 # flap 社交 pending: 入场时社交抓取失败, 标记待补查轮数 (0=pending, -1=已有社交)
@@ -5760,6 +5829,7 @@ def scan_once(cfg: dict) -> dict:
                 "price_change_h1": item.get("priceChangeH1", 0),
                 "socialCount": item.get("socialCount", 0),
                 "socialLinks": item.get("socialLinks", {}),
+                "_base_tags": item.get("_base_tags", []),
                 "_bonus_tags": item.get("_bonus_tags", []),
                 "_bonus_score": item.get("_bonus_score", 0),
             }
@@ -5824,6 +5894,8 @@ def output_scan_json(queue_state: dict, eliminated_this_round: list = None,
                 t["age_hours"] = (time.time() * 1000 - created_at) / 3600000
             else:
                 t["age_hours"] = 0
+        base_tags = t.get("_base_tags", []).copy()
+        t["base_tags"] = base_tags
         bonus_tags = t.get("_bonus_tags", []).copy()
         t["bonus_tags"] = bonus_tags
         t["bonus_score"] = t.get("_bonus_score", 0)

@@ -195,6 +195,8 @@ if (scanFiles.length === 0) {
       ra: t.raised_amount || 0,
       mc: t.market_cap || 0,
       ws: t.wallet_signals || [],
+      btg: t.base_tags || [],
+      bnt: t.bonus_tags || [],
       st: scanTime,
       src: source,           // 来源: filtered/queue/eliminated/rejected
       rsn: t.reason || '',   // 淘汰/拒绝原因
