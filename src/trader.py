@@ -96,6 +96,7 @@ FM_HELPER_V3 = Web3.to_checksum_address("0xF251F83e40a78868FcfA3FA4599Dad6494E46
 MAX_UINT256 = 2**256 - 1
 DEFAULT_GAS_SWAP = 500_000
 DEFAULT_GAS_APPROVE = 100_000
+FM_SELL_AMOUNT_GRANULARITY = 10 ** 9
 
 # ===================================================================
 #  ABI (最小化)
@@ -853,6 +854,23 @@ def fm_try_sell(token_address: str, amount: int) -> dict | None:
         return None
 
 
+def fm_floor_sell_amount(amount: int) -> int:
+    """four.meme sell amounts must be aligned to whole gwei-sized raw units."""
+    if amount <= 0:
+        return 0
+    return (int(amount) // FM_SELL_AMOUNT_GRANULARITY) * FM_SELL_AMOUNT_GRANULARITY
+
+
+def fm_ceil_sell_amount(amount: int, balance: int) -> int:
+    """Round up to an executable four.meme amount without exceeding balance."""
+    sellable_balance = fm_floor_sell_amount(balance)
+    if amount <= 0 or sellable_balance <= 0:
+        return 0
+    rounded = ((int(amount) + FM_SELL_AMOUNT_GRANULARITY - 1) //
+               FM_SELL_AMOUNT_GRANULARITY) * FM_SELL_AMOUNT_GRANULARITY
+    return min(rounded, sellable_balance)
+
+
 def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
                                balance: int, token_name: str = "") -> int | None:
     """
@@ -862,24 +880,41 @@ def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
     if desired_amount <= 0 or balance <= 0:
         return None
 
-    desired_amount = min(desired_amount, balance)
+    sellable_balance = fm_floor_sell_amount(balance)
+    if sellable_balance <= 0:
+        log.warning("分段止盈可卖余额低于 four.meme 数量精度: %s, 余额=%d",
+                    token_name or token_address[:16], balance)
+        return None
+
+    raw_desired_amount = min(desired_amount, sellable_balance)
+    desired_amount = fm_ceil_sell_amount(raw_desired_amount, sellable_balance)
+    if desired_amount <= 0:
+        return None
+    if desired_amount != raw_desired_amount:
+        log.info("分段止盈卖出数量已按 four.meme 1e9 精度对齐 %s: %d → %d",
+                 token_name or token_address[:16], raw_desired_amount, desired_amount)
+
     est = fm_try_sell(token_address, desired_amount)
     if est and est["netFunds"] > 0:
         return desired_amount
 
     # 先按倍数快速放大，避免对明显过小的 10% 分段直接发失败交易。
-    low = desired_amount + 1
+    unit = FM_SELL_AMOUNT_GRANULARITY
+    balance_units = sellable_balance // unit
+    desired_units = desired_amount // unit
+    low_units = desired_units + 1
     high = None
-    probe = desired_amount
+    probe_units = desired_units
     saw_estimate = est is not None
-    while probe < balance:
-        probe = min(balance, max(probe + 1, probe * 2))
+    while probe_units < balance_units:
+        probe_units = min(balance_units, max(probe_units + 1, probe_units * 2))
+        probe = probe_units * unit
         est = fm_try_sell(token_address, probe)
         saw_estimate = saw_estimate or est is not None
         if est and est["netFunds"] > 0:
-            high = probe
+            high = probe_units
             break
-        low = probe + 1
+        low_units = probe_units + 1
 
     if high is None:
         if not saw_estimate:
@@ -891,17 +926,19 @@ def fm_adjust_step_sell_amount(token_address: str, desired_amount: int,
         return None
 
     # 二分找到最小可执行数量，尽量少偏离“卖出10%剩余持仓”的策略。
-    left, right = low, high
+    left, right = low_units, high
     best = high
     while left <= right:
-        mid = (left + right) // 2
-        est = fm_try_sell(token_address, mid)
+        mid_units = (left + right) // 2
+        mid_amount = mid_units * unit
+        est = fm_try_sell(token_address, mid_amount)
         if est and est["netFunds"] > 0:
-            best = mid
-            right = mid - 1
+            best = mid_units
+            right = mid_units - 1
         else:
-            left = mid + 1
+            left = mid_units + 1
 
+    best = best * unit
     if best > desired_amount:
         log.info("分段止盈卖出数量已按 four.meme 最小可执行额调整 %s: %d → %d",
                  token_name or token_address[:16], desired_amount, best)
@@ -925,6 +962,11 @@ def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
 
     candidates = [
         ("saleToken(address,uint256)", ["address", "uint256"], [token_cs, amount]),
+        (
+            "sellToken(uint256,address,uint256,uint256)",
+            ["uint256", "address", "uint256", "uint256"],
+            [0, token_cs, amount, 0],
+        ),
         (
             "sellToken(uint256,address,address,uint256,uint256,uint256,address)",
             ["uint256", "address", "address", "uint256", "uint256", "uint256", "address"],
@@ -1314,9 +1356,20 @@ def fm_sell_token(token_address: str, amount: int | None = None,
         token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
 
         balance = token_contract.functions.balanceOf(_wallet_address).call()
+        sellable_balance = fm_floor_sell_amount(balance)
+        if sellable_balance <= 0:
+            log.warning("four.meme 可卖余额低于数量精度: %s, 余额=%d",
+                        token_name or token_address[:16], balance)
+            return None
+
         if amount is None:
-            amount = balance
-        amount = min(amount, balance)
+            amount = sellable_balance
+        else:
+            requested_amount = min(int(amount), sellable_balance)
+            amount = fm_floor_sell_amount(requested_amount)
+            if amount != requested_amount:
+                log.info("four.meme 卖出数量已按 1e9 精度对齐 %s: %d → %d",
+                         token_name or token_address[:16], requested_amount, amount)
         if amount <= 0:
             log.warning("无代币可卖: %s", token_name or token_address[:16])
             return None
@@ -1385,14 +1438,17 @@ def fm_sell_token(token_address: str, amount: int | None = None,
             balance_before = _w3.eth.get_balance(_wallet_address)
 
         tx = fm_build_sell_transaction(manager_cs, token_cs, amount, token_name)
-        if tx is None and allow_amount_expand and amount < balance:
+        if tx is None and allow_amount_expand and amount < sellable_balance:
             original_amount = amount
             for candidate in (
-                balance * 20 // 100,
-                balance * 40 // 100,
-                balance * 80 // 100,
+                sellable_balance * 20 // 100,
+                sellable_balance * 40 // 100,
+                sellable_balance * 80 // 100,
             ):
-                candidate = min(max(candidate, original_amount + 1), balance)
+                candidate = fm_ceil_sell_amount(
+                    max(candidate, original_amount + FM_SELL_AMOUNT_GRANULARITY),
+                    sellable_balance,
+                )
                 if candidate <= amount:
                     continue
                 tx = fm_build_sell_transaction(manager_cs, token_cs, candidate, token_name, quiet=True)
