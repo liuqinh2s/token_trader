@@ -55,7 +55,7 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
   - 波动充足: 扫描价格历史中至少一组涨幅 >= 10%
 
   加分标签 (通过基础标签后, 至少一项才开仓):
-  - 小涨跌不动: 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h(+1)
+  - 小涨跌不动: 持币数>=10 且 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h(+1)
   - 成交额异动: 阳线 + 成交额≥前6根之和(不足6根归一化) + 涨幅≤50% + 增量≥500u(+1)
     * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
   - 流动性异动: 仅已毕业, 两轮扫描之间流动性增加≥$1k且增长≥5%, 价格上涨且涨幅≤50%(+1)
@@ -420,6 +420,8 @@ BONUS_LIQUIDITY_30K = 30000     # 流动性 ≥ $30k → 加分
 # 小涨: 最低价到最高价涨幅 ≤ 3.5倍
 # 跌不下去: 最高价到最低价跌幅 ≤ 55%
 # 横盘时间区间: ≥ 3h 且 ≤ 8h
+# 持币数: ≥ 10
+BONUS_CONSOLIDATION_MIN_HOLDERS = 10     # 横盘加分最低持币数
 BONUS_CONSOLIDATION_MAX_GAIN = 3.5       # 横盘区间最大涨幅 (倍)
 BONUS_CONSOLIDATION_MAX_DRAWDOWN = 0.55  # 横盘区间最大回撤 (比例)
 BONUS_CONSOLIDATION_MIN_HOURS = 3.0      # 横盘最少时间 (小时)
@@ -4595,7 +4597,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 波动充足: 近8轮扫描价格(含本轮)两两之间至少一组涨幅≥10%; 不足8轮则用全部扫描
 
     加分标签 (通过基础标签后, 至少一项才开仓):
-      - 小涨跌不动: 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h
+      - 小涨跌不动: 持币数>=10 且 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h
       - 成交额异动: 阳线 + 成交额≥前6根之和(不足6根归一化) + 涨幅≤50% + 增量≥500u
         * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
       - 流动性异动: 仅已毕业, 两轮扫描之间流动性增加≥$1k且增长≥5%, 价格上涨且涨幅≤50%
@@ -4626,7 +4628,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
             continue
         t["_base_tags"] = []
 
-        holders = t.get("holders", 0)
+        holders = t.get("holders") or 0
         name = t.get("name") or addr[:16]
         progress = t.get("progress", 0)
         liquidity = t.get("liquidity", 0)
@@ -4665,8 +4667,8 @@ def tag_filter(candidates: list[dict], now_ms: int,
         bonus_score = 0
         bonus_tags = []
 
-        # --- 加分: 小涨跌不动 (横盘整理 ≥3h 且 ≤8h) ---
-        if price_hist and len(price_hist) >= 2:
+        # --- 加分: 小涨跌不动 (持币≥10 + 横盘整理 ≥3h 且 ≤8h) ---
+        if holders >= BONUS_CONSOLIDATION_MIN_HOLDERS and price_hist and len(price_hist) >= 2:
             consolidation = _check_consolidation(price_hist, age_hours)
             if consolidation:
                 bonus_score += BONUS_WEIGHT_CONSOLIDATION
