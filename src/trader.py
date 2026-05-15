@@ -2814,6 +2814,31 @@ def detect_scam_signals(history: list[dict], buy_time: int) -> dict:
 # ===================================================================
 #  卖出策略
 # ===================================================================
+def calc_tp_step_progress(base_price: float, current_price: float,
+                          step_pct: float) -> tuple[int, float, float]:
+    """
+    计算分段止盈一次跨过了多少个阶段。
+
+    返回: (跨过阶段数, 应卖出的剩余仓位比例, 下一阶段基准价)
+    """
+    if base_price <= 0 or current_price <= 0 or step_pct <= 0:
+        return 0, 0.0, base_price
+
+    step_multiplier = 1 + step_pct / 100
+    next_base_price = base_price
+    crossed_steps = 0
+
+    while current_price >= next_base_price * step_multiplier:
+        next_base_price *= step_multiplier
+        crossed_steps += 1
+
+    if crossed_steps <= 0:
+        return 0, 0.0, base_price
+
+    sell_ratio = 1 - (0.9 ** crossed_steps)
+    return crossed_steps, min(sell_ratio, 1.0), next_base_price
+
+
 def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
                           momentum: dict | None = None) -> tuple[bool, str, bool, float]:
@@ -2825,6 +2850,7 @@ def check_sell_conditions(pos: dict, current_price: float,
       1. 分段止盈: 每涨10%就卖出剩余持仓的10%
          - 第一次: 从买入价涨10% → 卖10%
          - 第二次: 从第一次止盈价再涨10% → 卖剩余的10%
+         - 如果价格一次跨过多个阶段, 按跨过阶段数连续计算卖出比例
          - 依此类推
       2. 回撤止盈: 盈利达到 tp_trigger_pct 后触发跟踪
          - 触发~tp_midpoint_pct 区间: 从最高价回撤 tp_drawdown_pct 即卖出
@@ -2849,9 +2875,16 @@ def check_sell_conditions(pos: dict, current_price: float,
 
     # ==================== 策略0: 分段止盈 ====================
     tp_step_threshold = trading_cfg.get("tp_step_pct", 10)
-    if step_profit_pct >= tp_step_threshold:
-        return True, (f"STEP_TP (分段止盈: 第{tp_step_count+1}次, 基准价 ${tp_step_base_price:.12f}, "
-                      f"当前 ${current_price:.12f} (+{step_profit_pct:.1f}%), 卖出10%剩余持仓)"), True, 0.1
+    step_count, step_sell_ratio, next_step_base_price = calc_tp_step_progress(
+        tp_step_base_price, current_price, tp_step_threshold)
+    if step_count > 0:
+        first_step = tp_step_count + 1
+        last_step = tp_step_count + step_count
+        step_label = f"第{first_step}次" if step_count == 1 else f"第{first_step}-{last_step}次(连续{step_count}阶段)"
+        return True, (f"STEP_TP (分段止盈: {step_label}, 基准价 ${tp_step_base_price:.12f}, "
+                      f"当前 ${current_price:.12f} (+{step_profit_pct:.1f}%), "
+                      f"下一基准价 ${next_step_base_price:.12f}, "
+                      f"卖出{step_sell_ratio * 100:.1f}%剩余持仓)"), True, step_sell_ratio
 
     # ==================== 策略1: 回撤止盈 ====================
     tp_trigger_pct = trading_cfg.get("tp_trigger_pct", 15)
@@ -3478,8 +3511,14 @@ def monitor_positions(cfg_loader, bnb_price_func):
                     if sell_result:
                         if is_step_tp:
                             # 分段止盈：不关闭持仓，只更新分段止盈字段
-                            new_tp_step_base_price = current_price
-                            new_tp_step_count = (pos.get("tp_step_count", 0) or 0) + 1
+                            trading_cfg = cfg.get("trading", {})
+                            step_count, _, new_tp_step_base_price = calc_tp_step_progress(
+                                pos.get("tp_step_base_price", 0) or buy_price,
+                                current_price,
+                                trading_cfg.get("tp_step_pct", 10),
+                            )
+                            step_count = max(1, step_count)
+                            new_tp_step_count = (pos.get("tp_step_count", 0) or 0) + step_count
                             
                             # 更新数据库
                             conn.execute("""
@@ -3489,8 +3528,8 @@ def monitor_positions(cfg_loader, bnb_price_func):
                             """, (new_tp_step_base_price, new_tp_step_count, pos["id"]))
                             conn.commit()
                             
-                            log.info("分段止盈执行成功 %s: 第%d次, 新基准价 $%.12f", 
-                                     name, new_tp_step_count, new_tp_step_base_price)
+                            log.info("分段止盈执行成功 %s: 本次跨过%d阶段, 累计第%d次, 新基准价 $%.12f",
+                                     name, step_count, new_tp_step_count, new_tp_step_base_price)
                             
                             # 发送通知
                             pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
