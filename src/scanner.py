@@ -14,7 +14,7 @@ v16 架构: 标签制精筛 (基础标签 AND + 加分标签排优先级)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 v16 精筛策略 (标签制: 基础全过 + 加分标签):
-  基础标签已注释, 所有代币基础全过
+  基础标签: 进度合格/波动充足 — 全部满足才进入加分计算
   加分标签: 小涨跌不动/成交额异动/流动性异动/进度异动/价格异动 — 硬指标, 至少一项才开仓
 
 砍掉的慢环节 (v5 → v6):
@@ -41,7 +41,6 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
 精筛条件 (限制条件 + 加分标签 + K 线防线):
 
   限制条件 (加分前必查, 任一不满足直接拒绝):
-  - 进度 >= 20% (防止一上来就撤池子的垃圾币)
   - 价格限制:
     * 近1~4轮整体涨幅均≤50%
     * 近1~8轮整体跌幅均≤15%
@@ -51,7 +50,11 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
     * 近1~4轮整体进度涨幅均≤50个百分点
     * 近1~8轮整体进度跌幅均≤15个百分点
 
-  加分标签 (通过限制条件后, 至少一项才开仓):
+  基础标签 (通过限制条件后, 全部满足):
+  - 进度合格: 当前进度 >= 20%
+  - 波动充足: 扫描价格历史中至少一组涨幅 >= 10%
+
+  加分标签 (通过基础标签后, 至少一项才开仓):
   - 小涨跌不动: 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h(+1)
   - 成交额异动: 阳线 + 成交额≥前6根之和(不足6根归一化) + 涨幅≤50% + 增量≥500u(+1)
     * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
@@ -467,8 +470,6 @@ BONUS_RECENT_MAX_ROUNDS = 8             # 检查近N轮到近2轮 [已废弃]
 BONUS_RECENT_MIN_PRICE_CHANGE = -0.20   # 每轮最小价格变化 (-20%) [已废弃]
 
 # --- 精筛后防线: K 线检查 ---
-# 币龄 <= 1h 时，要求当前进度 >= 20% (排除一上来就撤池子的垃圾币)
-FILTER_YOUNG_MIN_PROGRESS = 0.20         # 币龄 <= 1h 时最低进度 (20%)
 # 防追高检查 (用 K 线快照，对所有代币生效)
 # 当前价格不大于前一根K线开盘价的 50%，不大于前前根开盘价的 100%
 FILTER_MAX_GAIN_PREV1 = 0.50             # 相对前一根K线开盘价最大涨幅 (50%)
@@ -4549,23 +4550,17 @@ def _check_limit_conditions(t: dict) -> tuple[bool, str]:
     prog_hist = t.get("progressHistory", [])
     price_change_h1 = t.get("priceChangeH1")
     peak_price = t.get("peakPrice", 0)
-    progress = t.get("progress", 0)
-
-    # 1. 进度 >= 20% (防止一上来就撤池子的垃圾币)
-    if progress < 0.20:
-        return False, f"进度{progress*100:.0f}%<20%"
-
-    # 2. 价格限制检查
+    # 1. 价格限制检查
     passed, reason = _check_price_limit(price_hist, price_change_h1, peak_price, 0)
     if not passed:
         return False, reason
 
-    # 3. 进度限制检查
+    # 2. 进度限制检查
     passed, reason = _check_progress_limit(prog_hist)
     if not passed:
         return False, reason
 
-    # 4. 历史最大跌幅检查 (快照最高价到最低价, 从 priceHistory 全部历史中计算)
+    # 3. 历史最大跌幅检查 (快照最高价到最低价, 从 priceHistory 全部历史中计算)
     if price_hist and len(price_hist) >= 2:
         valid_prices = [p for p in price_hist if p > 0]
         if len(valid_prices) >= 2:
@@ -4596,6 +4591,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
         * 近1~8轮整体进度跌幅均≤15个百分点
 
     基础标签 (通过限制条件后、加分标签前必查):
+      - 进度合格: 当前进度≥20%
       - 波动充足: 近8轮扫描价格(含本轮)两两之间至少一组涨幅≥10%; 不足8轮则用全部扫描
 
     加分标签 (通过基础标签后, 至少一项才开仓):
@@ -4607,7 +4603,6 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 价格异动: 仅已毕业, 两轮扫描之间价格增长≥10%且≤50%
 
     K 线防线 (最后防线, 只对通过加分标签的代币执行):
-      - 币龄 <= 1h 时，当前进度 >= 20% (不依赖K线数据，优先检查)
       - 无K线数据时跳过K线相关检查、直接放行 (不影响推送和开仓)
       - 防追高: 当前价格不大于前一根K线开盘价的50%，不大于前前根开盘价的100%
       - 最高价到当前价格跌幅不大于 70%
@@ -4651,13 +4646,20 @@ def tag_filter(candidates: list[dict], now_ms: int,
             continue
 
         # ==================== 基础标签检查 (加分项前硬筛) ====================
+        base_tags = []
+        if progress < 0.20:
+            log.info("基础标签: ✗ %s — 进度合格未通过 (进度%.0f%%<20%%)", name, progress * 100)
+            continue
+        base_tags.append("进度合格")
+
         volatility_passed, volatility_reason = _check_sufficient_volatility(
             price_hist, t.get("scanCount")
         )
         if not volatility_passed:
             log.info("基础标签: ✗ %s — 波动充足未通过 (%s)", name, volatility_reason)
             continue
-        t["_base_tags"] = ["波动充足"]
+        base_tags.append("波动充足")
+        t["_base_tags"] = base_tags
 
         # ==================== 加分标签计算 ====================
         bonus_score = 0
@@ -4768,108 +4770,14 @@ def tag_filter(candidates: list[dict], now_ms: int,
         results.append(t)
 
         grad_str = "毕业" if is_graduated else f"进度{progress*100:.0f}%"
-        log.info("标签精筛: ✓ %s — 币龄=%.1fh, 加分=%d, 标签=[%s]",
+        log.info("标签精筛: ✓ %s — 币龄=%.1fh, 加分=%d, 基础=[%s], 加分=[%s]",
                  name, age_hours, bonus_score,
+                 ", ".join(base_tags),
                  ", ".join(bonus_tags) if bonus_tags else "无")
 
     results.sort(key=lambda x: x.get("_bonus_score", 0), reverse=True)
 
     return results, []
-
-
-def premium_screening_channel(survivors: list[dict], now_ms: int, cfg: dict) -> list[dict]:
-    """
-    New Premium Screening Channel:
-    - Token age <= 15 minutes (0.25 hours)
-    - Price between 0.0000032 and 0.000004
-    - Pick token with highest progress
-    - Check K-line high <= 0.0000045
-    - If no K-line, send DingTalk alert and log
-    """
-    log.info("--- Premium Screening Channel ---")
-    
-    filtered = []
-    for t in survivors:
-        age_hours = (now_ms - t.get("createdAt", 0)) / 3600000
-        price = t.get("price", 0)
-        
-        # Check age <= 15 minutes
-        if age_hours > 0.25:
-            continue
-            
-        # Check price range
-        if not (0.0000032 <= price <= 0.000004):
-            continue
-            
-        filtered.append(t)
-        
-    if not filtered:
-        log.info("Premium channel: No tokens meet age and price criteria")
-        return []
-        
-    # Sort by progress descending
-    filtered_sorted = sorted(filtered, key=lambda x: x.get("progress", 0), reverse=True)
-    candidate = filtered_sorted[0]
-    log.info("Premium channel: Selected candidate %s (progress=%.2f%%, price=%.8f, age=%.1f min)", 
-             candidate.get("name") or candidate["address"][:16],
-             candidate.get("progress", 0) * 100,
-             candidate.get("price", 0),
-             (now_ms - candidate.get("createdAt", 0)) / 60000)
-    
-    # Get K-line for this candidate - 必须先用 GeckoTerminal Token Pools API 获取最大流动性池子地址
-    log.info("Premium channel: 从 GT 获取最大流动性 pool 地址 [%s]", candidate["address"][:16])
-    gt_pool_from_api = gt_get_pool_address(candidate["address"])
-    
-    query_addr = None
-    if gt_pool_from_api:
-        normalized = _normalize_address(gt_pool_from_api)
-        if normalized:
-            log.info("Premium channel: 使用 GT 获取的 pool 地址查询 K线: %s", normalized[:16])
-            query_addr = normalized
-    
-    # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
-    if not query_addr:
-        gt_pool_addr = candidate.get("gtPoolAddress") or candidate.get("address")
-        normalized_pool = _normalize_address(gt_pool_addr)
-        if normalized_pool:
-            log.warning("Premium channel: 降级使用 gtPoolAddress [%s]", normalized_pool[:16])
-            query_addr = normalized_pool
-        else:
-            log.warning("Premium channel: 降级使用代币地址 [%s]", candidate["address"][:16])
-            query_addr = candidate["address"]
-        
-    candles = gt_ohlcv_15min(query_addr, limit=192)
-    
-    if not candles or len(candles) == 0:
-        log.error("Premium channel: Failed to get K-line for %s", candidate.get("name") or candidate["address"][:16])
-        # Send DingTalk alert
-        bot_token = cfg.get("dingtalk_webhook", "")
-        secret = cfg.get("dingtalk_secret", "")
-        if bot_token and "YOUR" not in bot_token:
-            msg = f"⚠️ Premium Screening Channel Alert\n"
-            msg += f"Token: {candidate.get('name') or candidate.get('symbol') or candidate['address']}\n"
-            msg += f"Address: {candidate['address']}\n"
-            msg += f"Reason: Failed to get K-line data"
-            try:
-                send_dingtalk(bot_token, secret, "Premium Channel Alert", msg)
-                log.info("Premium channel: Sent DingTalk alert for missing K-line")
-            except Exception as e:
-                log.error("Premium channel: Failed to send DingTalk alert: %s", e)
-        return []
-        
-    # Check K-line high
-    kline_high = max(float(c[2]) for c in candles if c[2] > 0)
-    log.info("Premium channel: K-line high for %s is %.8f", 
-             candidate.get("name") or candidate["address"][:16], kline_high)
-    
-    if kline_high > 0.0000045:
-        log.info("Premium channel: K-line high (%.8f) exceeds 0.0000045, rejected", kline_high)
-        return []
-        
-    # Passed!
-    log.info("Premium channel: Candidate %s passed!", candidate.get("name") or candidate["address"][:16])
-    candidate["_premium_channel"] = True
-    return [candidate]
 
 
 def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
@@ -5457,18 +5365,7 @@ def scan_once(cfg: dict) -> dict:
     market_sentiment = calc_market_sentiment(survivors, queue_state)
     scan_round = queue_state.get("scanRound", _scan_count - 1) + 1
     tag_results, _ = tag_filter(survivors, now_ms, market_sentiment)
-    
-    # 新增: 新精筛通道 (独立于标签)
-    premium_results = premium_screening_channel(survivors, now_ms, cfg)
-    
-    # 合并两个通道的结果 (去重)
-    quality_results = []
-    seen_addrs = set()
-    for t in tag_results + premium_results:
-        addr = t.get("address", "")
-        if addr and addr not in seen_addrs:
-            seen_addrs.add(addr)
-            quality_results.append(t)
+    quality_results = tag_results
 
     # 精筛代币持币数刷新: 用 BSCScan 网页爬取真实持币数 (four.meme detail 对未毕业币不准)
     # 必须在再验证之前执行, 否则再验证用的是旧数据
@@ -5751,13 +5648,12 @@ def scan_once(cfg: dict) -> dict:
     if no_kline_count > 0:
         log.info("K线数据: %d 个有K线, %d 个无K线 (不影响推送)", len(kline_results), no_kline_count)
 
-    # 过滤: 只推送有加分项的代币 OR 来自新精筛通道的代币
-    bonus_or_premium_filtered = [t for t in quality_results_for_dingding if 
-                                 t.get("_bonus_score", 0) > 0 or t.get("_premium_channel", False)]
-    excluded_count = len(quality_results_for_dingding) - len(bonus_or_premium_filtered)
+    # 过滤: 只推送有加分项的代币，确保推送和买入条件一致
+    bonus_filtered = [t for t in quality_results_for_dingding if t.get("_bonus_score", 0) > 0]
+    excluded_count = len(quality_results_for_dingding) - len(bonus_filtered)
     if excluded_count > 0:
-        log.info("加分项/新通道过滤: %d 个符合条件, %d 个不符合 (不推送)",
-                 len(bonus_or_premium_filtered), excluded_count)
+        log.info("加分项过滤: %d 个符合条件, %d 个不符合 (不推送)",
+                 len(bonus_filtered), excluded_count)
 
     # 过滤: 已持仓 / 卖出冷却期内 (这些情况不推送精筛报告)
     # 需要连接数据库检查
@@ -5767,10 +5663,10 @@ def scan_once(cfg: dict) -> dict:
     final_filtered = []
     held_count = 0
     cooldown_count = 0
-    if trading_enabled and len(bonus_or_premium_filtered) > 0:
+    if trading_enabled and len(bonus_filtered) > 0:
         import sqlite3
         conn = sqlite3.connect(str(DB_PATH))
-        for t in bonus_or_premium_filtered:
+        for t in bonus_filtered:
             addr = t.get("address", "")
             name = t.get("name") or t.get("symbol") or addr[:16]
             
@@ -5790,7 +5686,7 @@ def scan_once(cfg: dict) -> dict:
             final_filtered.append(t)
         conn.close()
     else:
-        final_filtered = bonus_or_premium_filtered
+        final_filtered = bonus_filtered
     
     if held_count > 0:
         log.info("持仓过滤: %d 个已有持仓 (不推送)", held_count)
