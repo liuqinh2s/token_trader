@@ -32,7 +32,7 @@ BNB 余额管理 (v18 新增):
   - 防止 BNB 价格波动导致资产缩水
 
 止盈止损策略:
-  1. 止盈: +50% 卖出一半, +100% 卖出全部剩余
+  1. 止盈: +100% 卖出全部剩余
   2. 固定止损: 亏损 20% 止损
   3. 时间止损: 买入 30 分钟内最高盈利没到 +15% 则卖出
 
@@ -2930,14 +2930,13 @@ def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
                           momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
-    检查是否满足卖出条件 (v19: +50%半仓, +100%清仓, -20%止损, 30分钟未达+15%清仓)
+    检查是否满足卖出条件 (v19: +100%清仓, -20%止损, 30分钟未达+15%清仓)
 
     返回: (是否应该卖出, 卖出原因, 是否是部分止盈, 要卖出的比例 (0-1))
     """
     trading_cfg = cfg.get("trading", {})
     buy_price = pos["buy_price_usd"]
     max_price = pos["max_price_usd"] or 0
-    tp_step_count = pos.get("tp_step_count", 0) or 0
 
     if buy_price <= 0 or current_price <= 0:
         return False, "", False, 0.0
@@ -2945,7 +2944,6 @@ def check_sell_conditions(pos: dict, current_price: float,
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else profit_pct
 
-    take_profit_half_pct = trading_cfg.get("take_profit_half_pct", 50)
     take_profit_full_pct = trading_cfg.get("take_profit_full_pct", 100)
     stop_loss_pct = trading_cfg.get("stop_loss_pct", -20)
     time_stop_minutes = trading_cfg.get("time_stop_minutes", 30)
@@ -2954,10 +2952,6 @@ def check_sell_conditions(pos: dict, current_price: float,
     if profit_pct >= take_profit_full_pct:
         return True, (f"FULL_TP (止盈清仓: 当前盈利 {profit_pct:.0f}%, "
                       f"阈值 {take_profit_full_pct:.0f}%, 卖出全部剩余)"), False, 1.0
-
-    if profit_pct >= take_profit_half_pct and tp_step_count < 1:
-        return True, (f"HALF_TP (半仓止盈: 当前盈利 {profit_pct:.0f}%, "
-                      f"阈值 {take_profit_half_pct:.0f}%, 卖出50%剩余持仓)"), True, 0.5
 
     if profit_pct <= stop_loss_pct:
         return True, (f"STOP_LOSS (固定止损: 亏损 {profit_pct:.0f}%, "
@@ -3519,26 +3513,8 @@ def monitor_positions(cfg_loader, bnb_price_func):
                         log.error("获取链上余额失败 %s: %s", name, e_bal)
                         continue
                     
-                    if is_step_tp:
-                        # 分段止盈：卖出指定比例
-                        sell_amount = current_balance * int(sell_ratio * 10000) // 10000
-                        # 检查卖出数量是否过小
-                        if sell_amount <= 0:
-                            log.warning("分段止盈卖出数量过小，跳过 %s: 余额 %d, 比例 %.1f%%, 计算结果 %d",
-                                        name, current_balance, sell_ratio * 100, sell_amount)
-                            continue
-                        if current_venue == "BONDING":
-                            adjusted_amount = fm_adjust_step_sell_amount(
-                                addr, sell_amount, current_balance, name)
-                            if adjusted_amount is None:
-                                notify_sell_failed(
-                                    cfg, name, addr,
-                                    f"分段止盈卖出数量低于 four.meme 可执行最小额，已跳过 (目标数量 {sell_amount}, 余额 {current_balance})")
-                                continue
-                            sell_amount = adjusted_amount
-                    else:
-                        # 其他止盈/止损：全部卖出
-                        sell_amount = None  # None 表示全部
+                    # 其他止盈/止损：全部卖出
+                    sell_amount = None  # None 表示全部
                     
                     if current_venue == "BONDING":
                         sell_result = fm_sell_token(addr, amount=sell_amount, token_name=name,
@@ -3552,59 +3528,30 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                                  token_name=name,
                                                  bnb_price_usd=bnb_price)
                     if sell_result:
-                        if is_step_tp:
-                            # 半仓止盈：不关闭持仓, 标记 +50% 档已执行
-                            new_tp_step_count = max(1, (pos.get("tp_step_count", 0) or 0) + 1)
-                            new_tp_step_base_price = current_price
-                            
-                            # 更新数据库
-                            conn.execute("""
-                                UPDATE positions 
-                                SET tp_step_base_price = ?, tp_step_count = ?
-                                WHERE id = ?
-                            """, (new_tp_step_base_price, new_tp_step_count, pos["id"]))
-                            conn.commit()
-                            
-                            log.info("半仓止盈执行成功 %s: 累计止盈标记=%d, 新基准价 $%.12f",
-                                     name, new_tp_step_count, new_tp_step_base_price)
-                            
-                            # 发送通知
-                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                            notify_reason = reason
-                            if sell_result.get("token_sold") and sell_amount is not None:
-                                actual_sold = int(sell_result["token_sold"])
-                                if actual_sold != sell_amount:
-                                    actual_pct = actual_sold / current_balance * 100 if current_balance > 0 else 0
-                                    notify_reason = f"{reason} (实际卖出约 {actual_pct:.1f}% 剩余持仓)"
-                            notify_sell(cfg, name, addr, notify_reason, pnl, sell_result["tx_hash"],
-                                        buy_price=buy_price, max_price=max_price,
-                                        sell_price=current_price)
-                        else:
-                            # 其他止盈/止损：关闭持仓
-                            # 验证链上余额确认代币确实被卖出
-                            try:
-                                token_cs = Web3.to_checksum_address(addr)
-                                token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
-                                remaining = token_contract.functions.balanceOf(_wallet_address).call()
-                                if remaining > 0:
-                                    decimals = token_contract.functions.decimals().call()
-                                    remaining_amount = remaining / (10 ** decimals)
-                                    remaining_value = remaining_amount * current_price
-                                    if remaining_value > 0.5:
-                                        log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
-                                                    name, remaining_amount, remaining_value)
-                                        notify_sell_failed(cfg, name, addr,
-                                                           f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
-                                        continue
-                            except Exception as e_check:
-                                log.debug("卖出后余额检查异常 %s: %s", name, e_check)
+                        # 关闭持仓前验证链上余额确实归零
+                        try:
+                            token_cs = Web3.to_checksum_address(addr)
+                            token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                            remaining = token_contract.functions.balanceOf(_wallet_address).call()
+                            if remaining > 0:
+                                decimals = token_contract.functions.decimals().call()
+                                remaining_amount = remaining / (10 ** decimals)
+                                remaining_value = remaining_amount * current_price
+                                if remaining_value > 0.5:
+                                    log.warning("卖出后仍有余额 %s: %.4f 个 (价值 $%.2f), 不关闭持仓",
+                                                name, remaining_amount, remaining_value)
+                                    notify_sell_failed(cfg, name, addr,
+                                                       f"卖出后仍有余额 {remaining_amount:.4f} 个 (价值 ${remaining_value:.2f}), 未完全卖出")
+                                    continue
+                        except Exception as e_check:
+                            log.debug("卖出后余额检查异常 %s: %s", name, e_check)
 
-                            close_position(conn, pos["id"], current_price,
-                                           sell_result["tx_hash"], reason, buy_price)
-                            pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                            notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
-                                        buy_price=buy_price, max_price=max_price,
-                                        sell_price=current_price)
+                        close_position(conn, pos["id"], current_price,
+                                       sell_result["tx_hash"], reason, buy_price)
+                        pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                        notify_sell(cfg, name, addr, reason, pnl, sell_result["tx_hash"],
+                                    buy_price=buy_price, max_price=max_price,
+                                    sell_price=current_price)
                         # 诈骗开发者记录: 亏损 80%+ 的代币, 记录 creator 到黑名单
                         if pnl <= -80:
                             try:

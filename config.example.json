@@ -34,7 +34,6 @@
         "buy_fraction": 0.01,
         "min_buy_usd": 1,
         "max_buy_usd": 10,
-        "take_profit_half_pct": 50,
         "take_profit_full_pct": 100,
         "time_stop_minutes": 30,
         "time_stop_min_profit_pct": 15,
