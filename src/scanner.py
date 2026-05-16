@@ -552,11 +552,13 @@ FAKE_NAME_BLACKLIST = {
 # 精筛后防线阈值
 # 精筛后防线阈值 — 使用 TOP10_CONCENTRATION_MAX (在上方加分标签区定义)
 
-# 淘汰阈值 (v18 移除持币数依赖)
+# 淘汰阈值 (v18 移除大部分持币数依赖)
 ELIM_PRICE_DROP_PCT = 0.95             # 价格从峰值跌 95% (给暴涨币更多回调空间)
 ELIM_LIQ_FLOOR = 100                   # 流动性跌破 $100 (仅已毕业)
 ELIM_LIQ_PEAK_MIN = 2000               # 流动性曾达到 $2k 才触发流动性枯竭淘汰 (避免误杀小币)
 ELIM_PROGRESS_DROP_ABS = 0.50          # 进度从峰值跌 50 个百分点淘汰 (放宽, 进度本身会波动)
+ELIM_LOW_HOLDERS_AGE_HOURS = 4         # 币龄 >= 4h 且持币数过低 → 垃圾币淘汰
+ELIM_LOW_HOLDERS_MIN = 5               # 持币数 < 5 淘汰
 # 进度阶梯淘汰 (币龄越长, 容忍度越高)
 ELIM_PROGRESS_TIERS = [
     (1.0, 0.01),    # 币龄 > 1h, 进度 < 1%
@@ -3762,6 +3764,12 @@ def elimination_check(queue: list[dict], now_ms: int,
         if t_symbol in FAKE_NAME_BLACKLIST or t_name in FAKE_NAME_BLACKLIST:
             elim_reason = f"蹭名币 ({t.get('symbol', '')})"
 
+        if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
+            holders = t.get("holders", 0)
+            if holders < ELIM_LOW_HOLDERS_MIN:
+                elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{holders}"
+                               f"<{ELIM_LOW_HOLDERS_MIN}")
+
         if elim_reason:
             eliminated.append({**t, "eliminatedAt": now_ms, "elimReason": elim_reason})
         else:
@@ -4036,19 +4044,25 @@ def elimination_check(queue: list[dict], now_ms: int,
             if current_liq < ELIM_LIQ_FLOOR:
                 elim_reason = f"流动性跌破 $100 (${current_liq:.0f})"
 
-        # 3. 进度阶梯淘汰 (币龄越长, 容忍度越高)
+        # 3. 低持币数垃圾币淘汰
+        if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
+            if current_holders < ELIM_LOW_HOLDERS_MIN:
+                elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{current_holders}"
+                               f"<{ELIM_LOW_HOLDERS_MIN}")
+
+        # 4. 进度阶梯淘汰 (币龄越长, 容忍度越高)
         if not elim_reason:
             for age_h, min_prog in ELIM_PROGRESS_TIERS:
                 if age_hours > age_h and current_progress < min_prog:
                     elim_reason = f"进度{current_progress * 100:.1f}% 币龄{_fmt_age(age_hours)} (阈值{min_prog*100:.0f}%)"
                     break
 
-        # 4. 修正后币龄 > 48h
+        # 5. 修正后币龄 > 48h
         if not elim_reason:
             if age_hours > MAX_AGE_HOURS:
                 elim_reason = f"币龄>{MAX_AGE_HOURS}h (修正后{_fmt_age(age_hours)})"
 
-        # 5. 进度从峰值跌 50 个百分点 (加减法, 无币龄要求)
+        # 6. 进度从峰值跌 50 个百分点 (加减法, 无币龄要求)
         if not elim_reason:
             peak_prog = t.get("peakProgress", 0)
             prog_diff = peak_prog - current_progress
@@ -5544,6 +5558,11 @@ def scan_once(cfg: dict) -> dict:
             if (t.get("peakLiquidity", 0) >= ELIM_LIQ_PEAK_MIN
                     and current_liq < ELIM_LIQ_FLOOR):
                 elim_reason = f"流动性 ${t.get('peakLiquidity', 0):.0f}→${current_liq:.0f}"
+        # 低持币数垃圾币淘汰
+        if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
+            if current_holders < ELIM_LOW_HOLDERS_MIN:
+                elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{current_holders}"
+                               f"<{ELIM_LOW_HOLDERS_MIN}")
         # 进度阶梯淘汰
         if not elim_reason:
             for age_h, min_prog in ELIM_PROGRESS_TIERS:
