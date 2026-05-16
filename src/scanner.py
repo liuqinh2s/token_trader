@@ -4576,8 +4576,8 @@ def _check_limit_conditions(t: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def tag_filter(candidates: list[dict], now_ms: int,
-               market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
+def tag_filter_legacy_v18(candidates: list[dict], now_ms: int,
+                          market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     标签制精筛 — v18: 限制条件 + 加分标签 + K 线防线
 
@@ -4779,6 +4779,46 @@ def tag_filter(candidates: list[dict], now_ms: int,
 
     results.sort(key=lambda x: x.get("_bonus_score", 0), reverse=True)
 
+    return results, []
+
+
+def tag_filter(candidates: list[dict], now_ms: int,
+               market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
+    """
+    精筛开仓策略 — v19:
+      - 币龄 <= 1h
+      - 进度 >= 40%
+
+    旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
+    """
+    results = []
+
+    for t in candidates:
+        addr = t.get("address", "")
+        name = t.get("name") or addr[:16]
+        progress = t.get("progress", 0) or 0
+        created_at = t.get("createdAt", 0) or 0
+        age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
+
+        if age_hours > 1.0:
+            log.info("精筛: ✗ %s — 币龄 %.2fh > 1h", name, age_hours)
+            continue
+        if progress < 0.40:
+            log.info("精筛: ✗ %s — 进度 %.1f%% < 40%%", name, progress * 100)
+            continue
+
+        is_graduated = progress >= 1.0
+        t["_base_tags"] = ["币龄≤1h", "进度≥40%"]
+        t["_bonus_tags"] = [f"新策略(币龄{_fmt_age(age_hours)}, 进度{progress * 100:.0f}%)"]
+        t["_bonus_score"] = 1
+        t["_age_hours"] = age_hours
+        t["_min_holders"] = _age_tier_match(age_hours, TAG_HOLDERS_TIERS)
+        t["isGraduated"] = is_graduated
+        results.append(t)
+
+        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%", name, age_hours, progress * 100)
+
+    results.sort(key=lambda x: (x.get("_age_hours", 999), -x.get("progress", 0)))
     return results, []
 
 

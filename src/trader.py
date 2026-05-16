@@ -31,13 +31,12 @@ BNB 余额管理 (v18 新增):
   - 仅在买入/卖出时检查 BNB 余额, 自动将多余 BNB 换回 USDT
   - 防止 BNB 价格波动导致资产缩水
 
-止盈止损策略 (无缓冲):
-  1. 盈利 15% 后触发回撤止盈跟踪:
-     - 15%~30% 区间: 回撤 15% 止盈
-     - 30% 以上: 中点止盈法 (价格 ≤ (最高价 + 买入价) / 2 时卖出)
-  2. 固定止损: 亏损 25% 止损
-  3. 动能衰竭止盈: 持币数/流动性/进度 多指标同时恶化时止盈
-  4. 超期清仓: 持仓超过 24h 且亏损 → 卖出
+止盈止损策略:
+  1. 止盈: +50% 卖出一半, +100% 卖出全部剩余
+  2. 固定止损: 亏损 20% 止损
+  3. 时间止损: 买入 30 分钟内最高盈利没到 +15% 则卖出
+
+旧版回撤/中点/10%分段止盈策略已备份为 check_sell_conditions_legacy_v18, 当前不参与卖出。
 
 诈骗币检测 (v19):
   - 检测规则: 1分钟K线没有连续3根及以上下跌的 → 诈骗币卖出
@@ -2839,9 +2838,9 @@ def calc_tp_step_progress(base_price: float, current_price: float,
     return crossed_steps, min(sell_ratio, 1.0), next_base_price
 
 
-def check_sell_conditions(pos: dict, current_price: float,
-                          cfg: dict,
-                          momentum: dict | None = None) -> tuple[bool, str, bool, float]:
+def check_sell_conditions_legacy_v18(pos: dict, current_price: float,
+                                     cfg: dict,
+                                     momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
     检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 中点止盈 + 固定止损 + 超期清仓)
     返回: (是否应该卖出, 卖出原因, 是否是分段止盈, 要卖出的比例 (0-1))
@@ -2923,6 +2922,52 @@ def check_sell_conditions(pos: dict, current_price: float,
 
     if profit_pct <= stop_loss_pct:
         return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), False, 1.0
+
+    return False, "", False, 0.0
+
+
+def check_sell_conditions(pos: dict, current_price: float,
+                          cfg: dict,
+                          momentum: dict | None = None) -> tuple[bool, str, bool, float]:
+    """
+    检查是否满足卖出条件 (v19: +50%半仓, +100%清仓, -20%止损, 30分钟未达+15%清仓)
+
+    返回: (是否应该卖出, 卖出原因, 是否是部分止盈, 要卖出的比例 (0-1))
+    """
+    trading_cfg = cfg.get("trading", {})
+    buy_price = pos["buy_price_usd"]
+    max_price = pos["max_price_usd"] or 0
+    tp_step_count = pos.get("tp_step_count", 0) or 0
+
+    if buy_price <= 0 or current_price <= 0:
+        return False, "", False, 0.0
+
+    profit_pct = (current_price - buy_price) / buy_price * 100
+    max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else profit_pct
+
+    take_profit_half_pct = trading_cfg.get("take_profit_half_pct", 50)
+    take_profit_full_pct = trading_cfg.get("take_profit_full_pct", 100)
+    stop_loss_pct = trading_cfg.get("stop_loss_pct", -20)
+    time_stop_minutes = trading_cfg.get("time_stop_minutes", 30)
+    time_stop_min_profit_pct = trading_cfg.get("time_stop_min_profit_pct", 15)
+
+    if profit_pct >= take_profit_full_pct:
+        return True, (f"FULL_TP (止盈清仓: 当前盈利 {profit_pct:.0f}%, "
+                      f"阈值 {take_profit_full_pct:.0f}%, 卖出全部剩余)"), False, 1.0
+
+    if profit_pct >= take_profit_half_pct and tp_step_count < 1:
+        return True, (f"HALF_TP (半仓止盈: 当前盈利 {profit_pct:.0f}%, "
+                      f"阈值 {take_profit_half_pct:.0f}%, 卖出50%剩余持仓)"), True, 0.5
+
+    if profit_pct <= stop_loss_pct:
+        return True, (f"STOP_LOSS (固定止损: 亏损 {profit_pct:.0f}%, "
+                      f"阈值 {stop_loss_pct:.0f}%)"), False, 1.0
+
+    hold_ms = int(time.time() * 1000) - pos["buy_time"]
+    hold_minutes = hold_ms / (60 * 1000)
+    if hold_minutes >= time_stop_minutes and max_profit_pct < time_stop_min_profit_pct:
+        return True, (f"TIME_STOP (买入 {hold_minutes:.0f}m, "
+                      f"最高盈利 {max_profit_pct:.0f}% < {time_stop_min_profit_pct:.0f}%)"), False, 1.0
 
     return False, "", False, 0.0
 
@@ -3411,14 +3456,12 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 hold_ms = int(time.time() * 1000) - pos["buy_time"]
                 hold_hours = hold_ms / (3600 * 1000)
                 hold_days = hold_hours / 24
-                expire_loss_hours = trading_cfg.get("expire_loss_hours", 48)
-                expire_underperform_hours = trading_cfg.get("expire_underperform_hours", 72)
-                expire_min_profit_pct = trading_cfg.get("expire_min_profit_pct", 500)
+                time_stop_minutes = trading_cfg.get("time_stop_minutes", 30)
+                time_stop_min_profit_pct = trading_cfg.get("time_stop_min_profit_pct", 15)
+                max_profit_pct = ((max_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
                 expire_tag = ""
-                if hold_hours >= expire_loss_hours and profit_pct < 0:
-                    expire_tag = f" ⚠️超期{expire_loss_hours:.0f}h仍亏损"
-                elif hold_hours >= expire_underperform_hours and profit_pct < expire_min_profit_pct:
-                    expire_tag = f" ⚠️超期{expire_underperform_hours:.0f}h未达{expire_min_profit_pct:.0f}%"
+                if hold_ms >= time_stop_minutes * 60 * 1000 and max_profit_pct < time_stop_min_profit_pct:
+                    expire_tag = f" ⚠️{time_stop_minutes:.0f}m最高未达{time_stop_min_profit_pct:.0f}%"
                 log.info("  %s [%s]: 当前 $%.12f | 买入 $%.12f | 最高 $%.12f | 盈亏 %+.1f%% | 持仓 %.1f天(%.0fh)%s",
                          name, venue, current_price, buy_price, max_price, profit_pct,
                          hold_days, hold_hours, expire_tag)
@@ -3510,15 +3553,9 @@ def monitor_positions(cfg_loader, bnb_price_func):
                                                  bnb_price_usd=bnb_price)
                     if sell_result:
                         if is_step_tp:
-                            # 分段止盈：不关闭持仓，只更新分段止盈字段
-                            trading_cfg = cfg.get("trading", {})
-                            step_count, _, new_tp_step_base_price = calc_tp_step_progress(
-                                pos.get("tp_step_base_price", 0) or buy_price,
-                                current_price,
-                                trading_cfg.get("tp_step_pct", 10),
-                            )
-                            step_count = max(1, step_count)
-                            new_tp_step_count = (pos.get("tp_step_count", 0) or 0) + step_count
+                            # 半仓止盈：不关闭持仓, 标记 +50% 档已执行
+                            new_tp_step_count = max(1, (pos.get("tp_step_count", 0) or 0) + 1)
+                            new_tp_step_base_price = current_price
                             
                             # 更新数据库
                             conn.execute("""
@@ -3528,8 +3565,8 @@ def monitor_positions(cfg_loader, bnb_price_func):
                             """, (new_tp_step_base_price, new_tp_step_count, pos["id"]))
                             conn.commit()
                             
-                            log.info("分段止盈执行成功 %s: 本次跨过%d阶段, 累计第%d次, 新基准价 $%.12f",
-                                     name, step_count, new_tp_step_count, new_tp_step_base_price)
+                            log.info("半仓止盈执行成功 %s: 累计止盈标记=%d, 新基准价 $%.12f",
+                                     name, new_tp_step_count, new_tp_step_base_price)
                             
                             # 发送通知
                             pnl = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
