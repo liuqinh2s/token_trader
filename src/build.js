@@ -47,8 +47,8 @@ function fetchDataFromGitBranch() {
   }
 }
 
-// 止盈触发点 (%), 精筛成功率以此为判定标准 — 改这里即可全局生效
-const TP_TRIGGER_PCT = 15;
+// 精筛成功判定阈值 (%), 精筛成功率以此为判定标准
+const TP_TRIGGER_PCT = 100;
 
 // 漏掉的好币判定阈值: 峰值涨幅 ≥ 此百分比视为"好币"
 const MISSED_THRESHOLD_PCT = 100;
@@ -429,11 +429,11 @@ if (scanFiles.length === 0) {
   const totalQuality = successTokens.length + failTokens.length;
   const successRate = totalQuality > 0 ? Math.round(successTokens.length / totalQuality * 10000) / 100 : 0;
 
-  // ===== 涨幅榜: 所有峰值涨幅 ≥ 50% 的代币 (含精筛成功+漏掉+队列中未精筛) =====
-  const GAINER_THRESHOLD_PCT = 50;
+  // ===== 涨幅榜: 所有峰值涨幅 ≥ 100% 的代币 (含精筛成功+漏掉+队列中未精筛) =====
+  const GAINER_THRESHOLD_PCT = 100;
   const GAINER_THRESHOLD = 1 + GAINER_THRESHOLD_PCT / 100;
 
-  // 收集所有涨幅 ≥ 50% 的代币 (从 missedMap 和 qualityMap 中筛选)
+  // 收集所有涨幅 ≥ 100% 的代币 (从 missedMap 和 qualityMap 中筛选)
   const allGainersMap = {};
 
   // 从 qualityMap 收集 (精筛通过的代币)

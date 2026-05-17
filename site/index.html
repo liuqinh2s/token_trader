@@ -3328,9 +3328,9 @@ function renderData(data) {
     function renderMobileQualityPanel() {
       if (!qualityStatsData) return;
       const d = qualityStatsData;
-      const tp = d.tpTriggerPct || 50;
+      const tp = d.tpTriggerPct || 100;
       const mp = d.missedThresholdPct || 100;
-      const gp = d.gainerThresholdPct || 50;
+      const gp = d.gainerThresholdPct || 100;
 
       const badge = document.getElementById('mobileQualityRateBadge');
       if (badge) badge.textContent = d.successRate + '%';
