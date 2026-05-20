@@ -2204,7 +2204,7 @@
     </div>
     <div class="about-content">
       <h2>BSC Token Scanner</h2>
-      <p class="about-subtitle">链上发现 · 队列淘汰 · 标签制精筛 · 极速 15min</p>
+      <p class="about-subtitle">链上发现 · 队列淘汰 · 横盘精筛 · 极速 15min</p>
 
       <div class="about-section">
         <h3>🔍 扫描流程</h3>
@@ -2234,10 +2234,8 @@
           <div class="flow-step">
             <span class="flow-num">4</span>
             <div>
-              <div class="flow-title">标签制精筛 (瞬时)</div>
-              <div class="flow-desc">统一通道，未毕业币和已毕业币走同一套标签制。基础标签全部满足(进度合格/波动充足/未崩盘/历史最大跌幅≤60%)
-                +
-                加分项触发(成交额/流动性/进度/价格异动等，至少一项)</div>
+              <div class="flow-title">横盘精筛 (瞬时)</div>
+              <div class="flow-desc">从队列存活币中筛选横盘不跌且近三轮微微上涨的代币，不再使用基础标签和加分标签</div>
             </div>
           </div>
         </div>
@@ -2245,7 +2243,7 @@
           <span class="flow-num">5</span>
           <div>
             <div class="flow-title">仿盘检测 (零 API)</div>
-            <div class="flow-desc">本地统计同名代币数量，≥3 个同名标记为仿盘；仿盘&lt;3 在精筛中排除</div>
+            <div class="flow-desc">本地统计同名代币数量，≥3 个同名标记为仿盘，供前端展示和复盘参考</div>
           </div>
         </div>
       </div>
@@ -2270,17 +2268,13 @@
     </div>
 
     <div class="about-section">
-      <h3>✅ 精筛条件（标签制）</h3>
+      <h3>✅ 精筛条件</h3>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
-        核心思路：基础标签保证底线质量，加分项确认增长动能。统一通道，未毕业币和已毕业币走同一套标签制，不再区分毕业通道。
-      </p>
-      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;line-height:1.5;">
-        <strong>基础标签（全部满足，AND）：</strong>
+        当前精筛只保留两个价格形态条件：横盘不跌 + 微微上涨。原先的基础标签和加分标签不再参与开仓。
       </p>
       <ul class="about-list">
-        <li>进度合格：当前进度 ≥ 20%；所有未毕业代币必须满足</li>
-        <li>波动充足：币龄 &gt; 8轮扫描时，近8轮价格（含本轮）两两之间至少一组涨幅 ≥ 10%；不足8轮时，用已记录的全部扫描价格检查同一要求</li>
-        <li>历史最大跌幅不超过 60%（完整价格历史中的最高价到最低价）</li>
+        <li>横盘不跌：近 24 小时内最高价到最低价的跌幅不大于 30%；历史不足 24 小时时使用已记录价格</li>
+        <li>微微上涨：当前价 ≥ 前前轮价格 × 1.1，且当前价 ≤ 前前轮价格 × 1.2</li>
       </ul>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
         大盘情绪（Gas指数）仍在每轮计算并记录，仅用于数据分析，不作为精筛阻断条件。

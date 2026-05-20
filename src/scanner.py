@@ -3,19 +3,18 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 数据源: BSC RPC (链上事件) + four.meme API (详情) + DexScreener (价格/涨跌幅/Boost) + GeckoTerminal (持币数)
 代币来源: four.meme + flap (BSC 链上两大代币发射平台, 均使用 bonding curve 机制)
 
-v16 架构: 标签制精筛 (基础标签 AND + 加分标签排优先级)
+当前架构: 横盘不跌 + 微微上涨精筛
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
   3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 标签制精筛, 基础标签全部满足(AND) + 加分标签排优先级
-     * h1价格变化有数据时检查涨幅≤50%且跌幅≤15%, 无数据时跳过不拒绝
+  4. 精筛 (瞬时): 横盘不跌 + 微微上涨
   5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
-v16 精筛策略 (标签制: 基础全过 + 加分标签):
-  基础标签: 进度合格/波动充足 — 全部满足才进入加分计算
-  加分标签: 小涨跌不动/成交额异动/流动性异动/进度异动/价格异动 — 硬指标, 至少一项才开仓
+当前精筛策略:
+  - 横盘不跌: 近 24 小时内最高价到最低价跌幅 <= 30%
+  - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -38,34 +37,9 @@ v16 精筛策略 (标签制: 基础全过 + 加分标签):
 
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
-精筛条件 (限制条件 + 加分标签 + K 线防线):
-
-  限制条件 (加分前必查, 任一不满足直接拒绝):
-  - 价格限制:
-    * 近1~4轮整体涨幅均≤50%
-    * 近1~8轮整体跌幅均≤15%
-    * h1价格变化有数据时: 涨幅≤50% 且 跌幅≤15%
-    * 快照最高价到当前价跌幅≤50%
-  - 进度限制 (加减法, 非乘除法):
-    * 近1~4轮整体进度涨幅均≤50个百分点
-    * 近1~8轮整体进度跌幅均≤15个百分点
-
-  基础标签 (通过限制条件后, 全部满足):
-  - 进度合格: 当前进度 >= 20%
-  - 波动充足: 扫描价格历史中至少一组涨幅 >= 10%
-
-  加分标签 (通过基础标签后, 至少一项才开仓):
-  - 小涨跌不动: 持币数>=10 且 最低→最高涨幅≤3.5倍 且 最高→最低跌幅≤55%, 横盘≥3h且≤8h(+1)
-  - 成交额异动: 阳线 + 成交额≥前6根之和(不足6根归一化) + 涨幅≤50% + 增量≥500u(+1)
-    * 仅限币龄<24h代币 (volume24h是24h累计值, >24h差分不准确)
-  - 流动性异动: 仅已毕业, 两轮扫描之间流动性增加≥$1k且增长≥5%, 价格上涨且涨幅≤50%(+1)
-  - 进度异动: 仅未毕业, 两轮之间进度涨≥10个百分点 + 价格上涨且涨幅≤50%(+1)
-  - 价格异动: 仅已毕业, 两轮扫描之间价格增长≥10%且≤50%(+1)
-
-  K 线防线 (最后防线, 只对通过加分标签的代币执行):
-  - 无K线数据时跳过K线相关检查、直接放行 (不影响推送和开仓)
-  - 防追高: 当前价格不大于前一根K线开盘价的50%，不大于前前根开盘价的100%
-  - 最高价到当前价格跌幅不大于 70%
+精筛条件:
+  - 横盘不跌: 近 24 小时内最高价到最低价跌幅 <= 30%
+  - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -270,7 +244,7 @@ BINANCE_HEADERS = {
 }
 
 # ================================================================
-#  精筛阈值 — 标签制 (基础标签 AND + 加分标签排优先级)
+#  历史/兼容阈值 — 旧标签制与淘汰逻辑仍会引用部分常量
 #
 #  v16 架构: 每个数据维度按币龄精细化分层, 币龄越长要求越高
 #  基础标签: 全部满足才通过精筛, 目标每天~30个 (AND 逻辑)
@@ -290,6 +264,13 @@ BINANCE_HEADERS = {
 MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
+
+# --- 当前精筛策略: 横盘不跌 + 微微上涨 ---
+QUALITY_SIDEWAYS_WINDOW_HOURS = 24
+QUALITY_SIDEWAYS_MAX_DRAWDOWN = 0.30
+QUALITY_MICRO_UP_ROUNDS = 3
+QUALITY_MICRO_UP_MIN_RATIO = 1.10
+QUALITY_MICRO_UP_MAX_RATIO = 1.20
 
 # --- 基础标签: 持币数 (age → min_holders) ---
 # 币龄越长持币数要求越高, 反映热度 & 共识程度
@@ -4554,6 +4535,59 @@ def _check_sufficient_volatility(price_hist: list[float], scan_count: int | None
     return False, f"近{len(valid_window)}轮最大涨幅{best_gain*100:.1f}%<{TAG_VOLATILITY_MIN_GAIN*100:.0f}%"
 
 
+def _valid_prices(prices: list[float]) -> list[float]:
+    return [p for p in prices if p and p > 0]
+
+
+def _check_sideways_no_drop(price_hist: list[float]) -> tuple[bool, str, dict]:
+    """
+    横盘不跌: 24小时内最高价到最低价的跌幅不大于30%。
+    价格历史不足24小时则使用已记录的有效历史。
+    """
+    rounds = int(QUALITY_SIDEWAYS_WINDOW_HOURS * 60 / SCAN_INTERVAL_MIN)
+    window = price_hist[-rounds:] if rounds > 0 else price_hist
+    valid = _valid_prices(window)
+    if len(valid) < 2:
+        return False, "24h有效价格历史不足2轮", {}
+
+    high = max(valid)
+    low = min(valid)
+    if high <= 0 or low <= 0:
+        return False, "24h价格无效", {}
+
+    drawdown = (high - low) / high
+    metrics = {"sideways_high": high, "sideways_low": low, "sideways_drawdown": drawdown}
+    if drawdown > QUALITY_SIDEWAYS_MAX_DRAWDOWN:
+        return False, f"24h高低跌幅{drawdown*100:.1f}%>{QUALITY_SIDEWAYS_MAX_DRAWDOWN*100:.0f}%", metrics
+    return True, "", metrics
+
+
+def _check_micro_up(price_hist: list[float]) -> tuple[bool, str, dict]:
+    """
+    微微上涨: 当前价是前前轮价格的 1.1x~1.2x。
+    """
+    recent = price_hist[-QUALITY_MICRO_UP_ROUNDS:]
+    if len(recent) < QUALITY_MICRO_UP_ROUNDS:
+        return False, f"近{QUALITY_MICRO_UP_ROUNDS}轮有效价格不足", {}
+
+    if any((not p or p <= 0) for p in recent):
+        return False, "近三轮价格无效", {}
+
+    base_price = recent[0]
+    current_price = recent[-1]
+    ratio = current_price / base_price
+    metrics = {
+        "micro_base_price": base_price,
+        "micro_current_price": current_price,
+        "micro_ratio": ratio,
+    }
+    if ratio < QUALITY_MICRO_UP_MIN_RATIO:
+        return False, f"当前/前前轮涨幅{(ratio-1)*100:.1f}%<{(QUALITY_MICRO_UP_MIN_RATIO-1)*100:.0f}%", metrics
+    if ratio > QUALITY_MICRO_UP_MAX_RATIO:
+        return False, f"当前/前前轮涨幅{(ratio-1)*100:.1f}%>{(QUALITY_MICRO_UP_MAX_RATIO-1)*100:.0f}%", metrics
+    return True, "", metrics
+
+
 def _check_limit_conditions(t: dict) -> tuple[bool, str]:
     """
     限制条件总入口 (加分前必查, 任一不满足直接拒绝)
@@ -4799,9 +4833,9 @@ def tag_filter_legacy_v18(candidates: list[dict], now_ms: int,
 def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
-    精筛开仓策略 — v19:
-      - 币龄 <= 1h
-      - 进度 >= 40%
+    精筛开仓策略:
+      - 横盘不跌: 近24小时内最高价到最低价跌幅 <= 30%
+      - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
     """
@@ -4810,29 +4844,40 @@ def tag_filter(candidates: list[dict], now_ms: int,
     for t in candidates:
         addr = t.get("address", "")
         name = t.get("name") or addr[:16]
-        progress = t.get("progress", 0) or 0
+        price_hist = t.get("priceHistory", [])
         created_at = t.get("createdAt", 0) or 0
         age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
+        progress = t.get("progress", 0) or 0
 
-        if age_hours > 1.0:
-            log.info("精筛: ✗ %s — 币龄 %.2fh > 1h", name, age_hours)
+        sideways_ok, sideways_reason, sideways_metrics = _check_sideways_no_drop(price_hist)
+        if not sideways_ok:
+            log.info("精筛: ✗ %s — 横盘不跌未通过 (%s)", name, sideways_reason)
             continue
-        if progress < 0.40:
-            log.info("精筛: ✗ %s — 进度 %.1f%% < 40%%", name, progress * 100)
+
+        micro_ok, micro_reason, micro_metrics = _check_micro_up(price_hist)
+        if not micro_ok:
+            log.info("精筛: ✗ %s — 微微上涨未通过 (%s)", name, micro_reason)
             continue
 
         is_graduated = progress >= 1.0
-        t["_base_tags"] = ["币龄≤1h", "进度≥40%"]
-        t["_bonus_tags"] = [f"新策略(币龄{_fmt_age(age_hours)}, 进度{progress * 100:.0f}%)"]
+        t["_base_tags"] = []
+        t["_bonus_tags"] = []
         t["_bonus_score"] = 1
         t["_age_hours"] = age_hours
         t["_min_holders"] = _age_tier_match(age_hours, TAG_HOLDERS_TIERS)
+        t["_quality_metrics"] = {**sideways_metrics, **micro_metrics}
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%", name, age_hours, progress * 100)
+        log.info("精筛: ✓ %s — 横盘跌幅=%.1f%%, 当前/前前轮涨幅=%.1f%%",
+                 name,
+                 sideways_metrics.get("sideways_drawdown", 0) * 100,
+                 (micro_metrics.get("micro_ratio", 1) - 1) * 100)
 
-    results.sort(key=lambda x: (x.get("_age_hours", 999), -x.get("progress", 0)))
+    results.sort(key=lambda x: (
+        x.get("_quality_metrics", {}).get("sideways_drawdown", 999),
+        x.get("_quality_metrics", {}).get("micro_ratio", 999),
+    ))
     return results, []
 
 
@@ -5414,8 +5459,8 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (标签制: 基础标签 + 加分项, 统一通道)
-    # 先批量查询社交质量 (Twitter 粉丝数 + TG 成员数, 用于加分计算)
+    # 精筛 (横盘不跌 + 微微上涨)
+    # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
     market_sentiment = calc_market_sentiment(survivors, queue_state)
@@ -5702,18 +5747,18 @@ def scan_once(cfg: dict) -> dict:
         return
 
     # 推送精筛结果 (代币详情, 不管是否开自动交易都推)
-    # 必须有加分项才推送，确保推送和买入条件一致
+    # _bonus_score 仅作为当前精筛通过后的推送/买入开关
     # K线数据仅用于展示，无K线不影响推送和开仓
     kline_results = [t for t in quality_results_for_dingding if not t.get("_kline_missing")]
     no_kline_count = len(quality_results_for_dingding) - len(kline_results)
     if no_kline_count > 0:
         log.info("K线数据: %d 个有K线, %d 个无K线 (不影响推送)", len(kline_results), no_kline_count)
 
-    # 过滤: 只推送有加分项的代币，确保推送和买入条件一致
+    # 过滤: 只推送通过当前精筛策略的代币，确保推送和买入条件一致
     bonus_filtered = [t for t in quality_results_for_dingding if t.get("_bonus_score", 0) > 0]
     excluded_count = len(quality_results_for_dingding) - len(bonus_filtered)
     if excluded_count > 0:
-        log.info("加分项过滤: %d 个符合条件, %d 个不符合 (不推送)",
+        log.info("精筛条件过滤: %d 个符合条件, %d 个不符合 (不推送)",
                  len(bonus_filtered), excluded_count)
 
     # 过滤: 已持仓 / 卖出冷却期内 (这些情况不推送精筛报告)
@@ -5790,10 +5835,9 @@ def scan_once(cfg: dict) -> dict:
                 "_bonus_tags": item.get("_bonus_tags", []),
                 "_bonus_score": item.get("_bonus_score", 0),
             }
-            bonus_str = " | ".join(detail_data["_bonus_tags"]) if detail_data["_bonus_tags"] else "无"
-            log.info("  📦 %s [%s] 加分(%d): %s",
+            log.info("  📦 %s [%s] 精筛通过",
                      token_data["shortName"] or token_data["name"],
-                     token_data["source"], detail_data["_bonus_score"], bonus_str)
+                     token_data["source"])
             to_buy.append((token_data, detail_data))
         log.info("自动买入: 准备买入 %d 个代币", len(to_buy))
         try:
@@ -5871,10 +5915,6 @@ def output_scan_json(queue_state: dict, eliminated_this_round: list = None,
         t["price_change_h1"] = t.get("priceChangeH1", 0)
         t["price_change_h24"] = t.get("priceChangeH24", 0)
         t["boosts"] = t.get("boosts", 0)
-        
-        if not t.get("_kline_missing") and (t.get("_kline_highest") or t.get("klineHigh")):
-            bonus_tags.append("通过k线筛")
-            t["bonus_tags"] = bonus_tags
         
         return t
 
