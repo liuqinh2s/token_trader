@@ -3,18 +3,21 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 数据源: BSC RPC (链上事件) + four.meme API (详情) + DexScreener (价格/涨跌幅/Boost) + GeckoTerminal (持币数)
 代币来源: four.meme + flap (BSC 链上两大代币发射平台, 均使用 bonding curve 机制)
 
-当前架构: 横盘不跌 + 微微上涨精筛
+当前架构: 早期硬条件精筛
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
   3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 横盘不跌 + 微微上涨
+  4. 精筛 (瞬时): 币龄≤1h + 进度≥40% + 持币数≥20 + 交易额≥4000u + 价格≤0.00003
   5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  - 横盘不跌: 近 24 小时内最高价到最低价跌幅 <= 30%
-  - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
+  - 币龄 <= 1h
+  - 进度 >= 40%
+  - 持币数 >= 20
+  - 交易额 >= 4000u
+  - 价格 <= 0.00003
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -38,8 +41,11 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  - 横盘不跌: 近 24 小时内最高价到最低价跌幅 <= 30%
-  - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
+  - 币龄 <= 1h
+  - 进度 >= 40%
+  - 持币数 >= 20
+  - 交易额 >= 4000u
+  - 价格 <= 0.00003
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -265,7 +271,14 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 横盘不跌 + 微微上涨 ---
+# --- 当前精筛策略: 早期硬条件 ---
+QUALITY_MAX_AGE_HOURS = 1.0
+QUALITY_MIN_PROGRESS = 0.40
+QUALITY_MIN_HOLDERS = 20
+QUALITY_MIN_VOLUME_USD = 4000
+QUALITY_MAX_PRICE = 0.00003
+
+# --- 旧价格形态精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_SIDEWAYS_WINDOW_HOURS = 24
 QUALITY_SIDEWAYS_MAX_DRAWDOWN = 0.30
 QUALITY_MICRO_UP_ROUNDS = 3
@@ -4539,6 +4552,51 @@ def _valid_prices(prices: list[float]) -> list[float]:
     return [p for p in prices if p and p > 0]
 
 
+def _quality_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _quality_volume_usd(t: dict) -> float:
+    """Return the best available USD volume field for the current quality filter."""
+    values = [_quality_float(t.get(key)) for key in (
+        "volume24h", "volume_24h", "day1Vol", "volumeH1", "volume_h1", "volume1h"
+    )]
+    return max(values) if values else 0
+
+
+def _check_quality_hard_conditions(t: dict, now_ms: int) -> tuple[bool, str, dict]:
+    created_at = _quality_float(t.get("createdAt"))
+    age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
+    progress = _quality_float(t.get("progress"))
+    holders = int(_quality_float(t.get("holders")))
+    current_price = _quality_float(t.get("price"))
+    volume_usd = _quality_volume_usd(t)
+    metrics = {
+        "age_hours": age_hours,
+        "progress": progress,
+        "holders": holders,
+        "volume_usd": volume_usd,
+        "price": current_price,
+    }
+
+    if age_hours > QUALITY_MAX_AGE_HOURS:
+        return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:.0f}h", metrics
+    if progress < QUALITY_MIN_PROGRESS:
+        return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", metrics
+    if holders < QUALITY_MIN_HOLDERS:
+        return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", metrics
+    if volume_usd < QUALITY_MIN_VOLUME_USD:
+        return False, f"交易额${volume_usd:.0f}<{QUALITY_MIN_VOLUME_USD:.0f}u", metrics
+    if current_price <= 0:
+        return False, f"价格无效 {current_price:.2e}", metrics
+    if current_price > QUALITY_MAX_PRICE:
+        return False, f"价格{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", metrics
+    return True, "", metrics
+
+
 def _check_sideways_no_drop(price_hist: list[float]) -> tuple[bool, str, dict]:
     """
     横盘不跌: 24小时内最高价到最低价的跌幅不大于30%。
@@ -4834,8 +4892,11 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      - 横盘不跌: 近24小时内最高价到最低价跌幅 <= 30%
-      - 微微上涨: 当前价是前前轮价格的 1.1x~1.2x
+      - 币龄 <= 1h
+      - 进度 >= 40%
+      - 持币数 >= 20
+      - 交易额 >= 4000u
+      - 价格 <= 0.00003
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
     """
@@ -4844,39 +4905,39 @@ def tag_filter(candidates: list[dict], now_ms: int,
     for t in candidates:
         addr = t.get("address", "")
         name = t.get("name") or addr[:16]
-        price_hist = t.get("priceHistory", [])
-        created_at = t.get("createdAt", 0) or 0
-        age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
-        progress = t.get("progress", 0) or 0
-
-        sideways_ok, sideways_reason, sideways_metrics = _check_sideways_no_drop(price_hist)
-        if not sideways_ok:
-            log.info("精筛: ✗ %s — 横盘不跌未通过 (%s)", name, sideways_reason)
+        quality_ok, quality_reason, quality_metrics = _check_quality_hard_conditions(t, now_ms)
+        if not quality_ok:
+            log.info("精筛: ✗ %s — %s", name, quality_reason)
             continue
 
-        micro_ok, micro_reason, micro_metrics = _check_micro_up(price_hist)
-        if not micro_ok:
-            log.info("精筛: ✗ %s — 微微上涨未通过 (%s)", name, micro_reason)
-            continue
-
+        age_hours = quality_metrics["age_hours"]
+        progress = quality_metrics["progress"]
+        holders = quality_metrics["holders"]
+        current_price = quality_metrics["price"]
+        volume_usd = quality_metrics["volume_usd"]
         is_graduated = progress >= 1.0
-        t["_base_tags"] = []
+        t["_base_tags"] = [
+            f"币龄≤{QUALITY_MAX_AGE_HOURS:.0f}h",
+            f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%",
+            f"持币≥{QUALITY_MIN_HOLDERS}",
+            f"交易额≥{QUALITY_MIN_VOLUME_USD:.0f}u",
+            f"价格≤{QUALITY_MAX_PRICE:g}",
+        ]
         t["_bonus_tags"] = []
         t["_bonus_score"] = 1
         t["_age_hours"] = age_hours
         t["_min_holders"] = _age_tier_match(age_hours, TAG_HOLDERS_TIERS)
-        t["_quality_metrics"] = {**sideways_metrics, **micro_metrics}
+        t["_quality_metrics"] = quality_metrics
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 横盘跌幅=%.1f%%, 当前/前前轮涨幅=%.1f%%",
-                 name,
-                 sideways_metrics.get("sideways_drawdown", 0) * 100,
-                 (micro_metrics.get("micro_ratio", 1) - 1) * 100)
+        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 交易额=$%.0f, 价格=%.2e",
+                 name, age_hours, progress * 100, holders, volume_usd, current_price)
 
     results.sort(key=lambda x: (
-        x.get("_quality_metrics", {}).get("sideways_drawdown", 999),
-        x.get("_quality_metrics", {}).get("micro_ratio", 999),
+        x.get("_quality_metrics", {}).get("age_hours", 999),
+        -x.get("_quality_metrics", {}).get("volume_usd", 0),
+        -x.get("_quality_metrics", {}).get("holders", 0),
     ))
     return results, []
 
@@ -5459,7 +5520,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (横盘不跌 + 微微上涨)
+    # 精筛 (币龄<=1h + 进度>=40% + 持币>=20 + 交易额>=4000u + 价格<=0.00003)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
@@ -5574,6 +5635,7 @@ def scan_once(cfg: dict) -> dict:
     # - 符合队列存活但不符合精筛 → 留在队列 (从精筛列表移除)
     revalidated = []
     demoted_to_elim = 0
+    demoted_from_quality = 0
     for t in quality_results:
         # 检查是否满足淘汰条件 (复用 elimination_check 的条件逻辑)
         age_hours = (now_ms - t.get("createdAt", 0)) / 3600000
@@ -5629,6 +5691,13 @@ def scan_once(cfg: dict) -> dict:
             log.info("精筛再验证: ✗ %s → 淘汰 (%s)",
                      t.get("name") or t["address"][:16], elim_reason)
         else:
+            quality_ok, quality_reason, quality_metrics = _check_quality_hard_conditions(t, now_ms)
+            if not quality_ok:
+                demoted_from_quality += 1
+                log.info("精筛再验证: ✗ %s → 留队 (%s)",
+                         t.get("name") or t["address"][:16], quality_reason)
+                continue
+            t["_quality_metrics"] = quality_metrics
             revalidated.append(t)
 
     # 再验证后的精筛结果替换原列表
@@ -5638,6 +5707,8 @@ def scan_once(cfg: dict) -> dict:
 
     if demoted_to_elim > 0:
         log.info("精筛再验证: %d 个淘汰", demoted_to_elim)
+    if demoted_from_quality > 0:
+        log.info("精筛再验证: %d 个留队", demoted_from_quality)
 
     # 按持币数排序
     quality_results.sort(key=lambda x: (x.get("holders", 0)), reverse=True)
