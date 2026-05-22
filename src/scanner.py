@@ -8,16 +8,15 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
   3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 币龄≤1h + 进度≥40% + 持币数≥20 + 交易额≥4000u + 价格≤0.00003
+  4. 精筛 (瞬时): 币龄≤0.5h + 进度≥15% + 持币数≥11 + 0.000005≤价格≤0.00002
   5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  - 币龄 <= 1h
-  - 进度 >= 40%
-  - 持币数 >= 20
-  - 交易额 >= 4000u
-  - 价格 <= 0.00003
+  - 币龄 <= 0.5h
+  - 进度 >= 15%
+  - 持币数 >= 11
+  - 0.000005 <= 价格 <= 0.00002
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -41,11 +40,10 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  - 币龄 <= 1h
-  - 进度 >= 40%
-  - 持币数 >= 20
-  - 交易额 >= 4000u
-  - 价格 <= 0.00003
+  - 币龄 <= 0.5h
+  - 进度 >= 15%
+  - 持币数 >= 11
+  - 0.000005 <= 价格 <= 0.00002
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -272,11 +270,11 @@ SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
 # --- 当前精筛策略: 早期硬条件 ---
-QUALITY_MAX_AGE_HOURS = 1.0
-QUALITY_MIN_PROGRESS = 0.40
-QUALITY_MIN_HOLDERS = 20
-QUALITY_MIN_VOLUME_USD = 4000
-QUALITY_MAX_PRICE = 0.00003
+QUALITY_MAX_AGE_HOURS = 0.5
+QUALITY_MIN_PROGRESS = 0.15
+QUALITY_MIN_HOLDERS = 11
+QUALITY_MIN_PRICE = 0.000005
+QUALITY_MAX_PRICE = 0.00002
 
 # --- 旧价格形态精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_SIDEWAYS_WINDOW_HOURS = 24
@@ -4559,26 +4557,16 @@ def _quality_float(value, default: float = 0.0) -> float:
         return default
 
 
-def _quality_volume_usd(t: dict) -> float:
-    """Return the best available USD volume field for the current quality filter."""
-    values = [_quality_float(t.get(key)) for key in (
-        "volume24h", "volume_24h", "day1Vol", "volumeH1", "volume_h1", "volume1h"
-    )]
-    return max(values) if values else 0
-
-
 def _check_quality_hard_conditions(t: dict, now_ms: int) -> tuple[bool, str, dict]:
     created_at = _quality_float(t.get("createdAt"))
     age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
-    volume_usd = _quality_volume_usd(t)
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
         "holders": holders,
-        "volume_usd": volume_usd,
         "price": current_price,
     }
 
@@ -4588,10 +4576,10 @@ def _check_quality_hard_conditions(t: dict, now_ms: int) -> tuple[bool, str, dic
         return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", metrics
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", metrics
-    if volume_usd < QUALITY_MIN_VOLUME_USD:
-        return False, f"交易额${volume_usd:.0f}<{QUALITY_MIN_VOLUME_USD:.0f}u", metrics
     if current_price <= 0:
         return False, f"价格无效 {current_price:.2e}", metrics
+    if current_price < QUALITY_MIN_PRICE:
+        return False, f"价格{current_price:.2e}<{QUALITY_MIN_PRICE:.2e}", metrics
     if current_price > QUALITY_MAX_PRICE:
         return False, f"价格{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", metrics
     return True, "", metrics
@@ -4892,11 +4880,10 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      - 币龄 <= 1h
-      - 进度 >= 40%
-      - 持币数 >= 20
-      - 交易额 >= 4000u
-      - 价格 <= 0.00003
+      - 币龄 <= 0.5h
+      - 进度 >= 15%
+      - 持币数 >= 11
+      - 0.000005 <= 价格 <= 0.00002
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
     """
@@ -4914,14 +4901,12 @@ def tag_filter(candidates: list[dict], now_ms: int,
         progress = quality_metrics["progress"]
         holders = quality_metrics["holders"]
         current_price = quality_metrics["price"]
-        volume_usd = quality_metrics["volume_usd"]
         is_graduated = progress >= 1.0
         t["_base_tags"] = [
-            f"币龄≤{QUALITY_MAX_AGE_HOURS:.0f}h",
+            f"币龄≤{QUALITY_MAX_AGE_HOURS:g}h",
             f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%",
             f"持币≥{QUALITY_MIN_HOLDERS}",
-            f"交易额≥{QUALITY_MIN_VOLUME_USD:.0f}u",
-            f"价格≤{QUALITY_MAX_PRICE:g}",
+            f"{QUALITY_MIN_PRICE:g}≤价格≤{QUALITY_MAX_PRICE:g}",
         ]
         t["_bonus_tags"] = []
         t["_bonus_score"] = 1
@@ -4931,13 +4916,13 @@ def tag_filter(candidates: list[dict], now_ms: int,
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 交易额=$%.0f, 价格=%.2e",
-                 name, age_hours, progress * 100, holders, volume_usd, current_price)
+        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e",
+                 name, age_hours, progress * 100, holders, current_price)
 
     results.sort(key=lambda x: (
         x.get("_quality_metrics", {}).get("age_hours", 999),
-        -x.get("_quality_metrics", {}).get("volume_usd", 0),
         -x.get("_quality_metrics", {}).get("holders", 0),
+        x.get("_quality_metrics", {}).get("price", 999),
     ))
     return results, []
 
@@ -5520,7 +5505,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h + 进度>=40% + 持币>=20 + 交易额>=4000u + 价格<=0.00003)
+    # 精筛 (币龄<=0.5h + 进度>=15% + 持币>=11 + 0.000005<=价格<=0.00002)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
