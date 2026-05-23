@@ -2338,6 +2338,9 @@
     const CARD_HEIGHT = 210;
     const BUFFER_COUNT = 5;
     const VIRTUAL_THRESHOLD = 20;
+    const QUALITY_CARD_TAP_MS = 500;
+    const QUALITY_CARD_TAP_MOVE = 10;
+    let qualityCardPointer = null;
 
     function renderVirtualList(container, items, cardBuilder, listId, scrollContainer) {
       if (virtualListState[listId] && virtualListState[listId].cleanup) {
@@ -2345,14 +2348,12 @@
       }
 
       if (items.length <= VIRTUAL_THRESHOLD) {
-        console.log('[VirtualScroll] ' + listId + ': only ' + items.length + ' items, no virtual scroll needed');
         container.innerHTML = items.map((t, i) => cardBuilder(t, i)).join('');
         virtualListState[listId] = null;
         return;
       }
 
       const totalHeight = items.length * CARD_HEIGHT;
-      console.log('[VirtualScroll] ' + listId + ': ' + items.length + ' items, total height: ' + totalHeight + 'px');
       container.innerHTML = `<div style="height:${totalHeight}px;position:relative;width:100%;">
         <div id="vsc_${listId}" style="position:absolute;left:0;right:0;top:0;width:100%;"></div>
       </div>`;
@@ -2363,7 +2364,6 @@
       function renderVisible() {
         const el = document.getElementById('vsc_' + listId);
         if (!el || !el.parentElement) {
-          console.log('[VirtualScroll] ' + listId + ': element not found or no parent');
           return;
         }
 
@@ -2378,12 +2378,9 @@
           scrolled = Math.max(0, -parentRect.top);
           viewportHeight = window.innerHeight;
         }
-        console.log('[VirtualScroll] ' + listId + ': scrolled=' + scrolled + ', viewportHeight=' + viewportHeight);
-
         const startIndex = Math.max(0, Math.floor(scrolled / CARD_HEIGHT) - BUFFER_COUNT);
         const visibleCount = Math.ceil(viewportHeight / CARD_HEIGHT) + BUFFER_COUNT * 2;
         const endIndex = Math.min(items.length, startIndex + visibleCount);
-        console.log('[VirtualScroll] ' + listId + ': rendering index ' + startIndex + ' to ' + endIndex);
 
         if (lastStart === startIndex && lastEnd === endIndex) return;
         lastStart = startIndex;
@@ -2403,7 +2400,6 @@
       }
 
       scroller.addEventListener('scroll', onScroll, { passive: true });
-      console.log('[VirtualScroll] ' + listId + ': scroll listener added, scroller=' + (scrollContainer ? 'container' : 'window'));
       renderVisible();
 
       virtualListState[listId] = {
@@ -2544,7 +2540,7 @@
     async function loadScanMobile(id) {
       try {
         const data = await cachedFetch('data/scans/' + id + '.json');
-        renderData(data);
+        renderData(data, { focusTab: 'filtered' });
         updateHistoryHighlight(id);
         updateHistoryPageHighlight(id);
         switchPage('home');
@@ -2775,8 +2771,28 @@ function toggleAutoRefresh() {
   autoRefreshTimer ? stopAutoRefresh() : startAutoRefresh();
 }
 
-function renderData(data) {
+function setActiveTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('#tabBar .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.getElementById('tokenTable').classList.toggle('hidden', tab !== 'filtered');
+      document.getElementById('queueTable').classList.toggle('hidden', tab !== 'queue');
+      document.getElementById('breakthroughTable').classList.toggle('hidden', tab !== 'breakthrough');
+      document.getElementById('eliminatedTable').classList.toggle('hidden', tab !== 'eliminated');
+      document.getElementById('rejectedTable').classList.toggle('hidden', tab !== 'rejected');
+    }
+
+    function renderCurrentTab() {
+      if (!currentData) return;
+      if (currentTab === 'filtered') renderFiltered(currentData);
+      else if (currentTab === 'queue') renderQueue(currentData);
+      else if (currentTab === 'breakthrough') renderBreakthrough(currentData);
+      else if (currentTab === 'eliminated') renderEliminated(currentData);
+      else if (currentTab === 'rejected') renderRejected(currentData);
+    }
+
+function renderData(data, options = {}) {
       currentData = data;
+      if (options.focusTab) setActiveTab(options.focusTab);
       document.getElementById('scanTime').textContent = data.scanTime || '--';
 
       // 近48小时淘汰数
@@ -2806,11 +2822,7 @@ function renderData(data) {
         else if (tab === 'rejected') btn.textContent = '拒绝 ' + rLen;
       });
 
-      renderFiltered(data);
-      renderQueue(data);
-      renderBreakthrough(data);
-      renderEliminated(data);
-      renderRejected(data);
+      renderCurrentTab();
     }
 
     function renderFiltered(data) {
@@ -2902,7 +2914,7 @@ function renderData(data) {
       const scanTimeHtml = showScanTime && t._scanTime ? `<div class="search-scan-time" style="margin-bottom:4px">📍 ${esc(t._scanTime)}</div>` : '';
       const bonusBadge = (t.bonus_score != null && t.bonus_score > 0)
         ? `<span class="bonus-badge" title="加分总分">🎖${t.bonus_score}</span>` : '';
-      return `<div class="token-card">
+      return `<div class="token-card" data-address="${esc(addr)}">
         ${scanTimeHtml}
         <div class="card-top">
           <span><span style="color:var(--text-muted);font-size:12px;margin-right:6px">#${i + 1}</span>${sourceBadge(addr, t.source)}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="点击复制">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span>${bonusBadge}</span>
@@ -3034,27 +3046,8 @@ function renderData(data) {
     }
 
     function switchTab(tab) {
-      currentTab = tab;
-      document.querySelectorAll('#tabBar .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-      document.getElementById('tokenTable').classList.toggle('hidden', tab !== 'filtered');
-      document.getElementById('queueTable').classList.toggle('hidden', tab !== 'queue');
-      document.getElementById('breakthroughTable').classList.toggle('hidden', tab !== 'breakthrough');
-      document.getElementById('eliminatedTable').classList.toggle('hidden', tab !== 'eliminated');
-      document.getElementById('rejectedTable').classList.toggle('hidden', tab !== 'rejected');
-      
-      if (!currentData) return;
-      
-      if (tab === 'filtered') {
-        requestAnimationFrame(() => renderFiltered(currentData));
-      } else if (tab === 'queue') {
-        requestAnimationFrame(() => renderQueue(currentData));
-      } else if (tab === 'breakthrough') {
-        requestAnimationFrame(() => renderBreakthrough(currentData));
-      } else if (tab === 'eliminated') {
-        requestAnimationFrame(() => renderEliminated(currentData));
-      } else if (tab === 'rejected') {
-        requestAnimationFrame(() => renderRejected(currentData));
-      }
+      setActiveTab(tab);
+      requestAnimationFrame(renderCurrentTab);
     }
 
     function esc(s) {
@@ -3359,6 +3352,71 @@ function renderData(data) {
       renderQualityList('mobileQualityGainerList', d.gainerTokens || [], false, 'gainers');
     }
 
+    function qualityCardPointerDown(e) {
+      if (e.target.closest('a,button,.card-name')) {
+        qualityCardPointer = null;
+        return;
+      }
+      qualityCardPointer = {
+        id: e.pointerId,
+        card: e.currentTarget,
+        time: Date.now(),
+        x: e.clientX,
+        y: e.clientY,
+      };
+    }
+
+    function qualityCardPointerCancel() {
+      qualityCardPointer = null;
+    }
+
+    function qualityCardPointerUp(e) {
+      if (!qualityCardPointer || qualityCardPointer.id !== e.pointerId || qualityCardPointer.card !== e.currentTarget) return;
+      const press = qualityCardPointer;
+      qualityCardPointer = null;
+      if (e.target.closest('a,button,.card-name')) return;
+      const dt = Date.now() - press.time;
+      const dx = Math.abs(e.clientX - press.x);
+      const dy = Math.abs(e.clientY - press.y);
+      if (dt > QUALITY_CARD_TAP_MS || dx > QUALITY_CARD_TAP_MOVE || dy > QUALITY_CARD_TAP_MOVE) return;
+      jumpToQualityEntry(e.currentTarget.dataset.scanId, e.currentTarget.dataset.address);
+    }
+
+    async function resolveQualityScanId(scanId, addr) {
+      if (scanId !== '' && scanId != null && scanId !== 'null' && scanId !== 'undefined') return Number(scanId);
+      const token = (qualityStatsData?.successTokens || [])
+        .concat(qualityStatsData?.failTokens || [], qualityStatsData?.gainerTokens || [])
+        .find(t => (t.address || '').toLowerCase() === (addr || '').toLowerCase() && t.entryTime);
+      if (!token) return null;
+      const rows = await cachedFetch('data/history.json');
+      const row = rows.find(r => r.scan_time === token.entryTime);
+      return row ? row.id : null;
+    }
+
+    async function jumpToQualityEntry(scanId, addr) {
+      try {
+        const id = await resolveQualityScanId(scanId, addr);
+        if (id == null || Number.isNaN(id)) {
+          showToast('找不到筛出时记录');
+          return;
+        }
+        const data = await cachedFetch('data/scans/' + id + '.json');
+        renderData(data, { focusTab: 'filtered' });
+        updateHistoryHighlight(id);
+        updateHistoryPageHighlight(id);
+        switchPage('home');
+        requestAnimationFrame(() => {
+          const card = Array.from(document.querySelectorAll('#cardList .token-card[data-address]'))
+            .find(el => (el.dataset.address || '').toLowerCase() === (addr || '').toLowerCase());
+          if (card) card.scrollIntoView({ block: 'center' });
+        });
+        showToast('已定位到筛出时精筛列表');
+      } catch (e) {
+        console.error(e);
+        showToast('加载失败');
+      }
+    }
+
     // 增强版卡片: 使用首页卡片样式，包含更多信息
     function buildQualityCard(t, source) {
       const addr = t.address || '';
@@ -3399,7 +3457,12 @@ function renderData(data) {
         ? `<a class="link-flap" href="https://flap.sh/bnb/${addr}" target="_blank" rel="noopener">Flap</a>`
         : `<a class="link-4m" href="https://four.meme/token/${addr}" target="_blank" rel="noopener">4M</a>`;
 
-      return `<div class="token-card">
+      const scanId = t.entryScanId != null ? t.entryScanId : '';
+      return `<div class="token-card" data-address="${esc(addr)}" data-scan-id="${scanId}"
+        onpointerdown="qualityCardPointerDown(event)"
+        onpointerup="qualityCardPointerUp(event)"
+        onpointercancel="qualityCardPointerCancel()"
+        onpointerleave="qualityCardPointerCancel()">
         <div class="card-top">
           <span>${sourceTag}<span class="card-name" onclick="copySymbol('${esc(t.symbol || '--')}')" title="${esc(t.name || '')}">${esc(t.symbol || '--')}</span><span class="card-symbol">${esc(t.name || '--')}</span></span>
           <span class="card-holders" style="font-size:16px" title="峰值涨幅">${peakGrowthSign}${t.peakGrowth}%</span>
@@ -3419,6 +3482,7 @@ function renderData(data) {
         </div>
         <div class="card-price-row" style="margin-top:2px">
           <span>持币:${t.entryHolders || 0}${t.peakHolders > 0 && t.peakHolders !== t.entryHolders ? ' (峰' + t.peakHolders + ')' : ''}</span>
+          <span>筛进度:${fmtProgress(t.entryProgress)}</span>
           <span>${esc(t.entryTime || '')}</span>
           ${t.entryAgeHours != null ? '<span>龄:' + fmtAge(t.entryAgeHours) + '</span>' : ''}
           ${elimReasonHtml}

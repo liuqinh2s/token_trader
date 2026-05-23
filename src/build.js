@@ -241,6 +241,7 @@ if (scanFiles.length === 0) {
   let totalFilteredCount = 0;
 
   // 正序遍历 (oldest first, 近 2 天数据)
+  const displayScanIdByFile = new Map(displayFiles.map((file, idx) => [file, idx]));
   const allFilesAsc = [...scanFiles].reverse();
   allFilesAsc.forEach((file) => {
     const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), "utf-8"));
@@ -268,6 +269,7 @@ if (scanFiles.length === 0) {
             symbol: t.symbol || '',
             entryPrice: t.price || 0,
             entryTime: st,
+            entryScanId: displayScanIdByFile.has(file) ? displayScanIdByFile.get(file) : null,
             entryHolders: t.holders || 0,
             entryProgress: t.progress || 0,
             entryLiquidity: t.liquidity || 0,
