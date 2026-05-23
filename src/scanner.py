@@ -17,6 +17,11 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   - 进度 >= 60%
   - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
+  - 币龄 >= 1h
+  - 仿盘数 <= 50
+  - 1h涨幅 <= 100%
+  - 24h成交额 >= 5000u
+  - 当前价/峰值价 >= 80%
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -44,6 +49,11 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   - 进度 >= 60%
   - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
+  - 币龄 >= 1h
+  - 仿盘数 <= 50
+  - 1h涨幅 <= 100%
+  - 24h成交额 >= 5000u
+  - 当前价/峰值价 >= 80%
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -275,6 +285,11 @@ QUALITY_MIN_HOLDERS = 25
 QUALITY_MAX_HOLDERS = 50
 QUALITY_MIN_PRICE = 0.00001
 QUALITY_MAX_PRICE = 0.00002
+QUALITY_MIN_AGE_HOURS = 1.0
+QUALITY_MAX_COPYCAT_COUNT = 50
+QUALITY_MAX_PRICE_CHANGE_H1 = 100.0
+QUALITY_MIN_VOLUME_24H = 5000.0
+QUALITY_MIN_PRICE_RATIO = 0.80
 QUALITY_HISTORY_MAX_DRAWDOWN = 0.35
 QUALITY_PROGRESS_SURGE_ROUNDS = 3
 QUALITY_PROGRESS_SURGE_MIN_DELTA = 0.10
@@ -4585,19 +4600,40 @@ def _volume_deltas(t: dict) -> list[float]:
 
 
 def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str], dict]:
-    created_at = _quality_float(t.get("createdAt"))
-    age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
+    created_at = _quality_float(t.get("createdAt", t.get("created_at", 0)))
+    age_hours = (
+        (now_ms - created_at) / 3600000
+        if created_at > 0
+        else _quality_float(t.get("age_hours", t.get("_age_hours", -1)), -1)
+    )
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
+    copycat_count = int(_quality_float(
+        t.get("copycat_count", (t.get("copycat") or {}).get("count", 0))
+    ))
+    price_change_h1 = _quality_float(t.get("priceChangeH1", t.get("price_change_h1", 0)))
+    volume24h = _quality_float(t.get("volume24h", t.get("day1Vol", t.get("day1_vol", 0))))
+    peak_price = _quality_float(t.get("peakPrice", t.get("max_price", t.get("ath", 0))))
+    price_ratio = _quality_float(t.get("price_ratio"), 0.0)
+    if price_ratio <= 0 and peak_price > 0 and current_price > 0:
+        price_ratio = current_price / peak_price
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
         "holders": holders,
         "price": current_price,
+        "copycat_count": copycat_count,
+        "price_change_h1": price_change_h1,
+        "volume24h": volume24h,
+        "peak_price": peak_price,
+        "price_ratio": price_ratio,
     }
 
+    if age_hours < QUALITY_MIN_AGE_HOURS:
+        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:.0f}h", base_tags, metrics
+    base_tags.append(f"币龄≥{QUALITY_MIN_AGE_HOURS:g}h")
     if progress < QUALITY_MIN_PROGRESS:
         return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
     base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
@@ -4613,6 +4649,18 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     if current_price > QUALITY_MAX_PRICE:
         return False, f"价格{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", base_tags, metrics
     base_tags.append(f"{QUALITY_MIN_PRICE:g}≤价格≤{QUALITY_MAX_PRICE:g}")
+    if copycat_count > QUALITY_MAX_COPYCAT_COUNT:
+        return False, f"仿盘数{copycat_count}>{QUALITY_MAX_COPYCAT_COUNT}", base_tags, metrics
+    base_tags.append(f"仿盘≤{QUALITY_MAX_COPYCAT_COUNT}")
+    if price_change_h1 > QUALITY_MAX_PRICE_CHANGE_H1:
+        return False, f"1h涨幅{price_change_h1:.1f}%>{QUALITY_MAX_PRICE_CHANGE_H1:.0f}%", base_tags, metrics
+    base_tags.append(f"1h涨幅≤{QUALITY_MAX_PRICE_CHANGE_H1:.0f}%")
+    if volume24h < QUALITY_MIN_VOLUME_24H:
+        return False, f"24h成交额${volume24h:.0f}<${QUALITY_MIN_VOLUME_24H:.0f}", base_tags, metrics
+    base_tags.append(f"24h量≥${QUALITY_MIN_VOLUME_24H:.0f}")
+    if price_ratio < QUALITY_MIN_PRICE_RATIO:
+        return False, f"价格比{price_ratio*100:.1f}%<{QUALITY_MIN_PRICE_RATIO*100:.0f}%", base_tags, metrics
+    base_tags.append(f"价格比≥{QUALITY_MIN_PRICE_RATIO*100:.0f}%")
 
     return True, "", base_tags, metrics
 
@@ -4965,6 +5013,11 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 进度 >= 60%
       - 25 <= 持币数 <= 50
       - 0.00001 <= 价格 <= 0.00002
+      - 币龄 >= 1h
+      - 仿盘数 <= 50
+      - 1h涨幅 <= 100%
+      - 24h成交额 >= 5000u
+      - 当前价/峰值价 >= 80%
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
     """
@@ -4982,6 +5035,10 @@ def tag_filter(candidates: list[dict], now_ms: int,
         progress = base_metrics["progress"]
         holders = base_metrics["holders"]
         current_price = base_metrics["price"]
+        copycat_count = base_metrics["copycat_count"]
+        price_change_h1 = base_metrics["price_change_h1"]
+        volume24h = base_metrics["volume24h"]
+        price_ratio = base_metrics["price_ratio"]
         is_graduated = progress >= 1.0
         t["_base_tags"] = base_tags
         t["_bonus_tags"] = ["新精筛"]
@@ -4992,9 +5049,13 @@ def tag_filter(candidates: list[dict], now_ms: int,
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e, 条件=[%s]",
-                 name, age_hours, progress * 100, holders, current_price,
-                 ", ".join(base_tags))
+        log.info(
+            "精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e, "
+            "仿盘=%d, 1h=%.1f%%, 24h量=$%.0f, 价格比=%.1f%%, 条件=[%s]",
+            name, age_hours, progress * 100, holders, current_price,
+            copycat_count, price_change_h1, volume24h, price_ratio * 100,
+            ", ".join(base_tags)
+        )
 
     results.sort(key=lambda x: (
         -x.get("_quality_metrics", {}).get("holders", 0),
