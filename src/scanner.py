@@ -3,28 +3,22 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 数据源: BSC RPC (链上事件) + four.meme API (详情) + DexScreener (价格/涨跌幅/Boost) + GeckoTerminal (持币数)
 代币来源: four.meme + flap (BSC 链上两大代币发射平台, 均使用 bonding curve 机制)
 
-当前架构: 基础标签 + 加分标签精筛
+当前架构: 队列淘汰 + AND 条件精筛
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
   3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 基础标签全满足 + 任一加分标签
+  4. 精筛 (瞬时): 币龄/进度/成交额/持币数/价格全部满足
   5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  基础标签 (AND):
-  - 币龄 >= 4h
-  - 进度 >= 25%
+  全部条件 (AND):
+  - 币龄 <= 1h
+  - 进度 >= 60%
+  - 成交额 >= 5000u
   - 持币数 >= 25
-  - 0.000005 <= 价格 <= 0.00002
-  - 近两轮价格均上涨
-  - 历史最高价到历史最低价跌幅 <= 35%
-  加分标签 (OR):
-  - 未毕业代币近3轮进度增加 >= 10个百分点
-  - 近3轮价格涨幅 >= 10%
-  - 本轮成交额 > 前6根成交额之和, 且本轮成交额 >= 500u
-  - 已毕业代币本轮流动性增加 >= 5%, 且流动性 >= 10000u
+  - 0.00001 <= 价格 <= 0.00002
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -48,18 +42,12 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  基础标签 (AND):
-  - 币龄 >= 4h
-  - 进度 >= 25%
+  全部条件 (AND):
+  - 币龄 <= 1h
+  - 进度 >= 60%
+  - 成交额 >= 5000u
   - 持币数 >= 25
-  - 0.000005 <= 价格 <= 0.00002
-  - 近两轮价格均上涨
-  - 历史最高价到历史最低价跌幅 <= 35%
-  加分标签 (OR):
-  - 未毕业代币近3轮进度增加 >= 10个百分点
-  - 近3轮价格涨幅 >= 10%
-  - 本轮成交额 > 前6根成交额之和, 且本轮成交额 >= 500u
-  - 已毕业代币本轮流动性增加 >= 5%, 且流动性 >= 10000u
+  - 0.00001 <= 价格 <= 0.00002
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -285,11 +273,12 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 基础标签 + 加分标签 ---
-QUALITY_MIN_AGE_HOURS = 4.0
-QUALITY_MIN_PROGRESS = 0.25
+# --- 当前精筛策略: 全部条件 AND ---
+QUALITY_MAX_AGE_HOURS = 1.0
+QUALITY_MIN_PROGRESS = 0.60
+QUALITY_MIN_VOLUME_USD = 5000
 QUALITY_MIN_HOLDERS = 25
-QUALITY_MIN_PRICE = 0.000005
+QUALITY_MIN_PRICE = 0.00001
 QUALITY_MAX_PRICE = 0.00002
 QUALITY_HISTORY_MAX_DRAWDOWN = 0.35
 QUALITY_PROGRESS_SURGE_ROUNDS = 3
@@ -4604,24 +4593,31 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     created_at = _quality_float(t.get("createdAt"))
     age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
     progress = _quality_float(t.get("progress"))
+    volume = (
+        _quality_float(t.get("volume24h"))
+        or _quality_float(t.get("volumeH1"))
+        or _quality_float(t.get("day1Vol"))
+    )
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
-    price_hist = _history_with_current(t, "priceHistory", "price")
-    valid_prices = _valid_prices(price_hist)
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
+        "volume": volume,
         "holders": holders,
         "price": current_price,
     }
 
-    if age_hours < QUALITY_MIN_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:.0f}h", base_tags, metrics
-    base_tags.append(f"币龄≥{QUALITY_MIN_AGE_HOURS:g}h")
+    if age_hours > QUALITY_MAX_AGE_HOURS:
+        return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
+    base_tags.append(f"币龄≤{QUALITY_MAX_AGE_HOURS:g}h")
     if progress < QUALITY_MIN_PROGRESS:
         return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
     base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
+    if volume < QUALITY_MIN_VOLUME_USD:
+        return False, f"成交额${volume:.0f}<${QUALITY_MIN_VOLUME_USD:.0f}", base_tags, metrics
+    base_tags.append(f"成交额≥${QUALITY_MIN_VOLUME_USD:.0f}")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
@@ -4632,20 +4628,6 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     if current_price > QUALITY_MAX_PRICE:
         return False, f"价格{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", base_tags, metrics
     base_tags.append(f"{QUALITY_MIN_PRICE:g}≤价格≤{QUALITY_MAX_PRICE:g}")
-
-    if len(valid_prices) < 3:
-        return False, "有效价格历史不足3轮", base_tags, metrics
-    if not (valid_prices[-2] > valid_prices[-3] and valid_prices[-1] > valid_prices[-2]):
-        return False, "近两轮价格未连续上涨", base_tags, metrics
-    base_tags.append("近两轮上涨")
-
-    hist_high = max(valid_prices)
-    hist_low = min(valid_prices)
-    drawdown = (hist_high - hist_low) / hist_high if hist_high > 0 else 1
-    metrics["history_drawdown"] = drawdown
-    if drawdown > QUALITY_HISTORY_MAX_DRAWDOWN:
-        return False, f"历史高低跌幅{drawdown*100:.1f}%>{QUALITY_HISTORY_MAX_DRAWDOWN*100:.0f}%", base_tags, metrics
-    base_tags.append(f"历史跌幅≤{QUALITY_HISTORY_MAX_DRAWDOWN*100:.0f}%")
 
     return True, "", base_tags, metrics
 
@@ -4994,19 +4976,12 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      基础标签 (全部满足):
-      - 币龄 >= 4h
-      - 进度 >= 25%
+      全部满足:
+      - 币龄 <= 1h
+      - 进度 >= 60%
+      - 成交额 >= 5000u
       - 持币数 >= 25
-      - 0.000005 <= 价格 <= 0.00002
-      - 近两轮价格均上涨
-      - 历史最高价距历史最低价跌幅 <= 35%
-
-      加分标签 (至少满足一项):
-      - 未毕业代币近3轮进度增加 >= 10个百分点
-      - 近3轮价格涨幅 >= 10%
-      - 本轮成交额 > 前6根成交额之和, 且本轮成交额 >= 500u
-      - 已毕业代币本轮流动性增加 >= 5%, 且流动性 >= 10000u
+      - 0.00001 <= 价格 <= 0.00002
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
     """
@@ -5020,33 +4995,28 @@ def tag_filter(candidates: list[dict], now_ms: int,
             log.info("基础标签: ✗ %s — %s", name, base_reason)
             continue
 
-        bonus_score, bonus_tags, bonus_metrics = _quality_bonus_tags(t)
-        if bonus_score <= 0:
-            log.info("加分标签: ✗ %s — 无加分项", name)
-            continue
-
         age_hours = base_metrics["age_hours"]
         progress = base_metrics["progress"]
+        volume = base_metrics["volume"]
         holders = base_metrics["holders"]
         current_price = base_metrics["price"]
         is_graduated = progress >= 1.0
-        quality_metrics = {**base_metrics, **bonus_metrics}
         t["_base_tags"] = base_tags
-        t["_bonus_tags"] = bonus_tags
-        t["_bonus_score"] = bonus_score
+        t["_bonus_tags"] = ["新精筛"]
+        t["_bonus_score"] = 1
         t["_age_hours"] = age_hours
         t["_min_holders"] = _age_tier_match(age_hours, TAG_HOLDERS_TIERS)
-        t["_quality_metrics"] = quality_metrics
+        t["_quality_metrics"] = base_metrics
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e, 基础=[%s], 加分=[%s]",
-                 name, age_hours, progress * 100, holders, current_price,
-                 ", ".join(base_tags), ", ".join(bonus_tags))
+        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 成交额=$%.0f, 持币=%d, 价格=%.2e, 条件=[%s]",
+                 name, age_hours, progress * 100, volume, holders, current_price,
+                 ", ".join(base_tags))
 
     results.sort(key=lambda x: (
-        -x.get("_bonus_score", 0),
         -x.get("_quality_metrics", {}).get("holders", 0),
+        -x.get("_quality_metrics", {}).get("volume", 0),
         x.get("_quality_metrics", {}).get("age_hours", 999),
     ))
     return results, []
@@ -5807,17 +5777,10 @@ def scan_once(cfg: dict) -> dict:
                 log.info("精筛再验证: ✗ %s → 留队 (%s)",
                          t.get("name") or t["address"][:16], base_reason)
                 continue
-            bonus_score, bonus_tags, bonus_metrics = _quality_bonus_tags(t)
-            if bonus_score <= 0:
-                demoted_from_quality += 1
-                log.info("精筛再验证: ✗ %s → 留队 (无加分项)",
-                         t.get("name") or t["address"][:16])
-                continue
             t["_base_tags"] = base_tags
-            t["_bonus_tags"] = bonus_tags
-            t["_bonus_score"] = bonus_score
-            quality_metrics = {**base_metrics, **bonus_metrics}
-            t["_quality_metrics"] = quality_metrics
+            t["_bonus_tags"] = ["新精筛"]
+            t["_bonus_score"] = 1
+            t["_quality_metrics"] = base_metrics
             revalidated.append(t)
 
     # 再验证后的精筛结果替换原列表
