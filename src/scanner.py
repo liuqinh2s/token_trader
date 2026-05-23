@@ -8,15 +8,13 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
   3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 币龄/进度/成交额/持币数/价格全部满足
+  4. 精筛 (瞬时): 进度/持币数/价格全部满足
   5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
   6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   全部条件 (AND):
-  - 币龄 <= 1h
   - 进度 >= 60%
-  - 成交额 >= 5000u
   - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
 
@@ -43,9 +41,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 
 精筛条件:
   全部条件 (AND):
-  - 币龄 <= 1h
   - 进度 >= 60%
-  - 成交额 >= 5000u
   - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
 
@@ -274,9 +270,7 @@ SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
 # --- 当前精筛策略: 全部条件 AND ---
-QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_PROGRESS = 0.60
-QUALITY_MIN_VOLUME_USD = 5000
 QUALITY_MIN_HOLDERS = 25
 QUALITY_MAX_HOLDERS = 50
 QUALITY_MIN_PRICE = 0.00001
@@ -4594,31 +4588,19 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     created_at = _quality_float(t.get("createdAt"))
     age_hours = (now_ms - created_at) / 3600000 if created_at > 0 else float("inf")
     progress = _quality_float(t.get("progress"))
-    volume = (
-        _quality_float(t.get("volume24h"))
-        or _quality_float(t.get("volumeH1"))
-        or _quality_float(t.get("day1Vol"))
-    )
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
-        "volume": volume,
         "holders": holders,
         "price": current_price,
     }
 
-    if age_hours > QUALITY_MAX_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄≤{QUALITY_MAX_AGE_HOURS:g}h")
     if progress < QUALITY_MIN_PROGRESS:
         return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
     base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
-    if volume < QUALITY_MIN_VOLUME_USD:
-        return False, f"成交额${volume:.0f}<${QUALITY_MIN_VOLUME_USD:.0f}", base_tags, metrics
-    base_tags.append(f"成交额≥${QUALITY_MIN_VOLUME_USD:.0f}")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     if holders > QUALITY_MAX_HOLDERS:
@@ -4980,9 +4962,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
     """
     精筛开仓策略:
       全部满足:
-      - 币龄 <= 1h
       - 进度 >= 60%
-      - 成交额 >= 5000u
       - 25 <= 持币数 <= 50
       - 0.00001 <= 价格 <= 0.00002
 
@@ -5000,7 +4980,6 @@ def tag_filter(candidates: list[dict], now_ms: int,
 
         age_hours = base_metrics["age_hours"]
         progress = base_metrics["progress"]
-        volume = base_metrics["volume"]
         holders = base_metrics["holders"]
         current_price = base_metrics["price"]
         is_graduated = progress >= 1.0
@@ -5013,13 +4992,12 @@ def tag_filter(candidates: list[dict], now_ms: int,
         t["isGraduated"] = is_graduated
         results.append(t)
 
-        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 成交额=$%.0f, 持币=%d, 价格=%.2e, 条件=[%s]",
-                 name, age_hours, progress * 100, volume, holders, current_price,
+        log.info("精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e, 条件=[%s]",
+                 name, age_hours, progress * 100, holders, current_price,
                  ", ".join(base_tags))
 
     results.sort(key=lambda x: (
         -x.get("_quality_metrics", {}).get("holders", 0),
-        -x.get("_quality_metrics", {}).get("volume", 0),
         x.get("_quality_metrics", {}).get("age_hours", 999),
     ))
     return results, []
