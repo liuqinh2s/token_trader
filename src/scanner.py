@@ -17,7 +17,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   - 币龄 <= 1h
   - 进度 >= 60%
   - 成交额 >= 5000u
-  - 持币数 >= 25
+  - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
 
 砍掉的慢环节 (v5 → v6):
@@ -46,7 +46,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   - 币龄 <= 1h
   - 进度 >= 60%
   - 成交额 >= 5000u
-  - 持币数 >= 25
+  - 25 <= 持币数 <= 50
   - 0.00001 <= 价格 <= 0.00002
 
 交易策略 (trader.py):
@@ -278,6 +278,7 @@ QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_PROGRESS = 0.60
 QUALITY_MIN_VOLUME_USD = 5000
 QUALITY_MIN_HOLDERS = 25
+QUALITY_MAX_HOLDERS = 50
 QUALITY_MIN_PRICE = 0.00001
 QUALITY_MAX_PRICE = 0.00002
 QUALITY_HISTORY_MAX_DRAWDOWN = 0.35
@@ -4620,7 +4621,9 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     base_tags.append(f"成交额≥${QUALITY_MIN_VOLUME_USD:.0f}")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
-    base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
+    if holders > QUALITY_MAX_HOLDERS:
+        return False, f"持币数{holders}>{QUALITY_MAX_HOLDERS}", base_tags, metrics
+    base_tags.append(f"{QUALITY_MIN_HOLDERS}≤持币≤{QUALITY_MAX_HOLDERS}")
     if current_price <= 0:
         return False, f"价格无效 {current_price:.2e}", base_tags, metrics
     if current_price < QUALITY_MIN_PRICE:
@@ -4980,7 +4983,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 币龄 <= 1h
       - 进度 >= 60%
       - 成交额 >= 5000u
-      - 持币数 >= 25
+      - 25 <= 持币数 <= 50
       - 0.00001 <= 价格 <= 0.00002
 
     旧的标签制精筛已备份为 tag_filter_legacy_v18, 当前不参与开仓。
