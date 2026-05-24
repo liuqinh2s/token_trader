@@ -1,16 +1,14 @@
 """
 BSC Token Scanner v7 — 极速扫描, 以快致胜
-数据源: BSC RPC (链上事件) + four.meme API (详情) + DexScreener (价格/涨跌幅/Boost) + GeckoTerminal (持币数)
+数据源: BSC RPC (链上事件) + four.meme API (详情) + DexScreener (价格/涨跌幅/Boost)
 代币来源: four.meme + flap (BSC 链上两大代币发射平台, 均使用 bonding curve 机制)
 
 当前架构: 队列淘汰 + 条件精筛
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  3b. K线修正: 对持币≥50 的存活代币拉 GT 15min K线 → 修正 peakPrice + 记录 klineHigh/klineLow (过山车检测)
-  4. 精筛 (瞬时): 币龄<=1h && 进度>=40% && 持币>=5
-  5. 精筛后补充: 对精筛通过的 flap 代币补充 GT h1 数据 (flap 代币 DexScreener 数据不完整)
-  6. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
+  4. 精筛 (瞬时): 币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退
+  5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   - 币龄 <= 1h
@@ -39,7 +37,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  币龄<=1h && 进度>=40% && 持币>=5
+  币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -177,7 +175,6 @@ def load_config() -> dict:
 FM_SEARCH = "https://four.meme/meme-api/v1/public/token/search"
 FM_DETAIL = "https://four.meme/meme-api/v1/private/token/get/v2"
 FM_TICKER = "https://four.meme/meme-api/v1/public/ticker"
-GT_BASE = "https://api.geckoterminal.com/api/v2"
 DS_BASE = "https://api.dexscreener.com"
 BSCSCAN_API = "https://api.etherscan.io/v2/api"  # Etherscan V2 API (支持 chainid 参数)
 BSC_RPC = "https://bsc-rpc.publicnode.com/"
@@ -226,14 +223,6 @@ FM_HEADERS = {
     "Origin": "https://four.meme",
     "Referer": "https://four.meme/",
 }
-GT_HEADERS = {
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.geckoterminal.com/",
-    "Origin": "https://www.geckoterminal.com",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-}
 DS_HEADERS = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
 BINANCE_HEADERS = {
     "Content-Type": "application/json",
@@ -263,7 +252,7 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 币龄<=1h && 进度>=40% && 持币>=5 ---
+# --- 当前精筛策略: 币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退 ---
 QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_PROGRESS = 0.40
 QUALITY_MIN_HOLDERS = 5
@@ -642,7 +631,7 @@ def _build_session(proxy_cfg: dict | None = None,
 
 _fm_session: requests.Session = None  # type: ignore
 _bnb_usd_price: float = 600.0  # BNB/USD 实时价格, scan_once 中更新
-_gt_session: requests.Session = None  # type: ignore
+_http_session: requests.Session = None  # type: ignore
 _bsc_session: requests.Session = None  # type: ignore
 _bn_session: requests.Session = None  # type: ignore
 _ipfs_session: requests.Session = None  # type: ignore  # IPFS 专用 (无重试, 短超时)
@@ -663,7 +652,7 @@ def _build_ipfs_session(proxy_cfg: dict | None = None) -> requests.Session:
 
 
 def _ensure_sessions():
-    global _fm_session, _gt_session, _bsc_session, _bn_session, _ipfs_session
+    global _fm_session, _http_session, _bsc_session, _bn_session, _ipfs_session
     if _fm_session is None:
         try:
             cfg = load_config()
@@ -671,7 +660,7 @@ def _ensure_sessions():
         except Exception:
             proxy = None
         _fm_session = _build_session(proxy, FM_HEADERS)
-        _gt_session = _build_session(proxy, GT_HEADERS)
+        _http_session = _build_session(proxy)
         _bsc_session = _build_session(proxy, DS_HEADERS)
         _bn_session = _build_session(proxy, BINANCE_HEADERS)
         _ipfs_session = _build_ipfs_session(proxy)
@@ -1091,7 +1080,7 @@ def flap_page_meta(address: str) -> dict | None:
     _ensure_sessions()
     try:
         url = f"{FLAP_PAGE_URL}{address}"
-        r = _gt_session.get(url, timeout=15, headers={
+        r = _http_session.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html",
@@ -1202,7 +1191,7 @@ def _fetch_twitter_followers(username: str) -> int | None:
     """
     _ensure_sessions()
     try:
-        r = _gt_session.get(
+        r = _http_session.get(
             f"https://x.com/{username}",
             timeout=10,
             headers={
@@ -1231,7 +1220,7 @@ def _fetch_telegram_members(username: str) -> int | None:
     """
     _ensure_sessions()
     try:
-        r = _gt_session.get(
+        r = _http_session.get(
             f"https://t.me/{username}",
             timeout=10,
             headers={
@@ -2559,10 +2548,10 @@ def ds_get_pairs(token_address: str) -> list[dict] | None:
     _ensure_sessions()
     url = f"{DS_BASE}/tokens/v1/bsc/{token_address}"
     try:
-        r = _gt_session.get(url, timeout=10, headers=DS_HEADERS)
+        r = _http_session.get(url, timeout=10, headers=DS_HEADERS)
         if r.status_code == 429:
             time.sleep(2)
-            r = _gt_session.get(url, timeout=10, headers=DS_HEADERS)
+            r = _http_session.get(url, timeout=10, headers=DS_HEADERS)
         r.raise_for_status()
         data = r.json()
         if isinstance(data, list):
@@ -2587,7 +2576,7 @@ def ds_batch_prices(addresses: list[str]) -> dict[str, dict]:
         # 指数退避重试
         for attempt in range(max_retries):
             try:
-                r = _gt_session.get(url, timeout=20, headers=DS_HEADERS)
+                r = _http_session.get(url, timeout=20, headers=DS_HEADERS)
                 if r.status_code == 429:
                     wait = 3 * (attempt + 1)
                     log.warning("DS 429 限流, 等待 %ds (%d/%d)", wait, attempt + 1, max_retries)
@@ -2656,100 +2645,10 @@ def ds_batch_prices(addresses: list[str]) -> dict[str, dict]:
 
 def gt_batch_token_info(addresses: list[str], existing_data: dict[str, dict] | None = None) -> dict[str, dict]:
     """
-    GeckoTerminal 批量查价格+流动性+涨跌幅+交易量+买卖笔数 (作为 DexScreener 的备选数据源)
-    
-    用途:
-    1. 为 DexScreener 数据不完整的代币补充数据 (flap 代币普遍缺 h1 数据)
-    2. 作为 DexScreener 失败时的备选数据源
-    
-    返回格式与 ds_batch_prices 一致，方便合并
-    
-    API 限流: ~30 req/min，每个代币独立请求，需控制速率
+    GeckoTerminal 请求已禁用。
+    保留函数壳用于兼容旧调用点，始终返回空结果。
     """
-    result = {}
-    if not addresses:
-        return result
-    
-    _ensure_sessions()
-    
-    for addr in addresses:
-        addr_lower = addr.lower()
-        
-        # 如果已有完整数据，跳过
-        if existing_data and addr_lower in existing_data:
-            existing = existing_data[addr_lower]
-            # 检查是否已有 h1 数据 (flap 代币普遍缺这个)
-            has_h1 = existing.get("priceChangeH1", 0) != 0 or existing.get("buysH1", 0) > 0
-            if has_h1:
-                continue
-        
-        try:
-            # GeckoTerminal pools API 返回交易对的完整数据
-            url = f"{GT_BASE}/networks/bsc/tokens/{addr_lower}/pools"
-            r = _gt_session.get(url, timeout=15, headers=GT_HEADERS)
-            if r.status_code == 429:
-                log.warning("GT 429 限流, 跳过 %s", addr_lower[:16])
-                time.sleep(2)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            pools = data.get("data", [])
-            
-            if not pools:
-                continue
-            
-            # 取第一个交易对 (通常是流动性最高的)
-            pool = pools[0]
-            attrs = pool.get("attributes", {})
-            
-            # 价格变化 (GeckoTerminal 返回字符串格式的百分比)
-            pc = attrs.get("price_change_percentage", {}) or {}
-            
-            # 交易笔数
-            txns = attrs.get("transactions", {}) or {}
-            txns_h1 = txns.get("h1", {}) or {}
-            txns_h24 = txns.get("h24", {}) or {}
-            
-            # 交易量
-            vol = attrs.get("volume_usd", {}) or {}
-            
-            # 流动性
-            liquidity = float(attrs.get("reserve_in_usd") or 0)
-            
-            # 价格
-            price = float(attrs.get("token_price_usd") or attrs.get("base_token_price_usd") or 0)
-            
-            result[addr_lower] = {
-                "price": price,
-                "liquidity": liquidity,
-                "volume24h": float(vol.get("h24") or 0),
-                "volumeH1": float(vol.get("h1") or 0),
-                "buysH1": int(txns_h1.get("buys") or 0),
-                "sellsH1": int(txns_h1.get("sells") or 0),
-                "buysH24": int(txns_h24.get("buys") or 0),
-                "sellsH24": int(txns_h24.get("sells") or 0),
-                "priceChangeM5": float(pc.get("m5") or 0),
-                "priceChangeH1": float(pc.get("h1") or 0),
-                "priceChangeH6": float(pc.get("h6") or 0),
-                "priceChangeH24": float(pc.get("h24") or 0),
-                "boosts": 0,  # GeckoTerminal 无 Boost 数据
-                "name": attrs.get("name", "").split("/")[0].strip() if attrs.get("name") else "",
-                "symbol": "",
-                "pairAddress": (attrs.get("address") or "").lower(),
-                "_source": "gt",  # 标记数据来源
-            }
-            
-            # 速率控制: ~2 req/s
-            time.sleep(0.5)
-            
-        except Exception as e:
-            log.debug("GT 批量查价失败 [%s]: %s", addr_lower[:16], e)
-            time.sleep(0.5)
-    
-    if result:
-        log.info("GT 补充数据: %d 个代币", len(result))
-    
-    return result
+    return {}
 
 
 def merge_price_data(ds_data: dict[str, dict], gt_data: dict[str, dict]) -> dict[str, dict]:
@@ -2834,157 +2733,29 @@ def _normalize_address(raw_addr: str) -> str | None:
 #  GeckoTerminal API (备选K线, ~30 req/min)
 # ===================================================================
 def _gt_request(url: str, max_retries: int = 5) -> dict | None:
-    global _gt_rate_delay
-    _ensure_sessions()
-    for attempt in range(max_retries):
-        try:
-            r = _gt_session.get(url, timeout=15)
-            if r.status_code == 429:
-                wait = 10 * (attempt + 1)  # 增加等待时间
-                _gt_rate_delay = min(10.0, _gt_rate_delay + 2.0)
-                log.warning("GT 429, 等待 %ds (%d/%d)", wait, attempt + 1, max_retries)
-                time.sleep(wait)
-                continue
-            if r.status_code == 404:
-                log.debug("GT 404 未找到 [%s]", url[-60:])
-                return None
-            if r.status_code != 200:
-                log.debug("GT 请求返回非200状态码: %d - %s (%d/%d)", 
-                          r.status_code, url[-60:], attempt + 1, max_retries)
-            r.raise_for_status()
-            _gt_rate_delay = max(0.5, _gt_rate_delay - 0.2)
-            return r.json()
-        except Exception as e:
-            log.debug("GT 请求失败 [%s]: %s (尝试 %d/%d)", 
-                      url[-60:], str(e)[:100], attempt + 1, max_retries)
-            if attempt < max_retries - 1:
-                time.sleep(3)
-    log.warning("GT 请求最终失败 [%s]", url[-60:])
+    log.debug("GT 请求已禁用: %s", url[-80:])
     return None
 
 
 def gt_holder_counts(addresses: list[str]) -> dict[str, int]:
     """
-    GeckoTerminal token info API 查持币地址数 (免费, 无需 key)
-    仅用于已毕业代币 (bonding curve 结束后)
-    限流: ~30 req/min, 需控制请求速率
+    GeckoTerminal 请求已禁用，始终返回空结果。
     """
-    result = {}
-    if not addresses:
-        return result
-    for addr in addresses:
-        url = f"{GT_BASE}/networks/bsc/tokens/{addr}/info"
-        data = _gt_request(url)
-        if data:
-            holders = (data.get("data", {}).get("attributes", {})
-                       .get("holders", {}).get("count"))
-            if holders and holders > 0:
-                result[addr] = holders
-        time.sleep(0.4)  # ~2.5 req/s, 留余量避免 429
-    log.info("GT 查到 %d/%d 个代币持币数", len(result), len(addresses))
-    return result
+    return {}
 
 
 def gt_get_pool_address(token_address: str) -> str | None:
     """
-    从 GeckoTerminal API 获取代币流动性最大的 pool 地址
-    GeckoTerminal API: GET /networks/bsc/tokens/{address}/pools
+    GeckoTerminal 请求已禁用，始终返回 None。
     """
-    try:
-        url = f"{GT_BASE}/networks/bsc/tokens/{token_address}/pools"
-        data = _gt_request(url)
-        if not data:
-            return None
-        
-        pools = data.get("data", [])
-        if not pools:
-            log.debug("GT pools API 返回空列表 [%s]", token_address[:16])
-            return None
-        
-        best_pool = None
-        best_liquidity = -1
-        
-        for pool in pools:
-            attrs = pool.get("attributes", {})
-            if not isinstance(attrs, dict):
-                continue
-            
-            # 获取池子地址
-            pool_addr = None
-            
-            # 优先从 attributes.address 字段提取
-            addr_from_attr = attrs.get("address", "")
-            if addr_from_attr:
-                pool_addr = _normalize_address(addr_from_attr)
-            
-            # 兜底: 从 id 字段提取
-            if not pool_addr:
-                pool_id = pool.get("id", "")
-                if pool_id:
-                    if "pools/" in pool_id:
-                        raw = pool_id.split("pools/")[-1]
-                    elif "_0x" in pool_id:
-                        raw = "0x" + pool_id.split("_0x", 1)[-1]
-                    else:
-                        raw = pool_id
-                    pool_addr = _normalize_address(raw)
-            
-            if not pool_addr:
-                continue
-            
-            # 获取流动性，优先使用 liquidity_usd
-            liquidity = -1
-            liquidity_usd = attrs.get("liquidity_usd")
-            if liquidity_usd is not None and liquidity_usd != "":
-                try:
-                    liquidity = float(liquidity_usd)
-                except (ValueError, TypeError):
-                    pass
-            
-            # 如果没有 liquidity_usd，尝试从其他字段获取
-            if liquidity < 0:
-                reserve_usd = attrs.get("reserve_in_usd")
-                if reserve_usd is not None and reserve_usd != "":
-                    try:
-                        liquidity = float(reserve_usd)
-                    except (ValueError, TypeError):
-                        pass
-            
-            # 记录当前池子，选择流动性最大的
-            if liquidity > best_liquidity:
-                best_liquidity = liquidity
-                best_pool = pool_addr
-                log.debug("GT 找到更好的 pool [%s]: %s (liquidity=%.2f)", 
-                          token_address[:16], pool_addr[:16], liquidity)
-        
-        if best_pool:
-            log.info("GT 选择流动性最大的 pool [%s]: %s (liquidity=%.2f)", 
-                     token_address[:16], best_pool[:16], best_liquidity)
-            return best_pool
-        
-        log.debug("GT pools API 未找到有效 pool 地址 [%s]", token_address[:16])
-    except Exception as e:
-        log.debug("GT 获取 pool 地址失败 [%s]: %s", token_address[:16], str(e)[:50])
-    
     return None
 
 
 def gt_batch_pool_addresses(token_addresses: list[str]) -> dict[str, str]:
     """
-    批量从 GeckoTerminal API 获取代币的 pool 地址
+    GeckoTerminal 请求已禁用，始终返回空结果。
     """
-    result = {}
-    if not token_addresses:
-        return result
-    
-    for addr in token_addresses:
-        pool_addr = gt_get_pool_address(addr)
-        if pool_addr:
-            result[addr] = pool_addr
-        time.sleep(0.4)  # 控制速率
-    
-    log.info("GT 批量获取 pool 地址: %d/%d", len(result), len(token_addresses))
-    return result
+    return {}
 
 
 def bscscan_scrape_holder_count(token_address: str) -> int | None:
@@ -3016,7 +2787,6 @@ def graduated_holder_counts(addresses: list[str]) -> dict[str, int]:
     BSCScan 网页爬取持币数 (并发, ~2s/个)
     用于: 已毕业代币 + detail API 返回 holders==0 的代币
     BSCScan 网页端有持币数, 免费 API 不支持, 直接爬网页
-    GeckoTerminal 作为备选 (太慢, 仅在 BSCScan 失败时使用)
     """
     result = {}
     if not addresses:
@@ -3036,315 +2806,37 @@ def graduated_holder_counts(addresses: list[str]) -> dict[str, int]:
 
     log.info("BSCScan 网页查到 %d/%d 个代币持币数", len(result), len(addresses))
 
-    # BSCScan 没查到的, 用 GT 补 (逐个查, 较慢, 仅补漏)
     missing = [a for a in addresses if a not in result]
-    if missing and len(missing) <= 5:
-        log.info("BSCScan 未覆盖 %d 个, 尝试 GT 补全...", len(missing))
-        gt_result = gt_holder_counts(missing)
-        result.update(gt_result)
-        if gt_result:
-            log.info("GT 补全 %d 个", len(gt_result))
-    elif missing:
-        log.info("BSCScan 未覆盖 %d 个, 跳过 GT (数量过多)", len(missing))
+    if missing:
+        log.info("BSCScan 未覆盖 %d 个, GT 请求已禁用不补全", len(missing))
 
     return result
 
 
 def gt_ohlcv_direct(token_address: str, limit: int = 72) -> list[list]:
-    """直接用 tokenAddress 当 poolAddress 拿 1h K线"""
-    url = f"{GT_BASE}/networks/bsc/pools/{token_address}/ohlcv/hour?aggregate=1&limit={limit}"
-    data = _gt_request(url)
-    if not data:
-        return []
-    return (data.get("data", {}).get("attributes", {}).get("ohlcv_list", []))
+    """GeckoTerminal 请求已禁用，始终返回空 K线。"""
+    return []
 
 
 def gt_ohlcv_15min(token_address: str, limit: int = 48) -> list[list]:
-    """拿 15 分钟 K线 (用于币龄<1h的底价计算)"""
-    url = f"{GT_BASE}/networks/bsc/pools/{token_address}/ohlcv/minute?aggregate=15&limit={limit}"
-    data = _gt_request(url)
-    if not data:
-        return []
-    return (data.get("data", {}).get("attributes", {}).get("ohlcv_list", []))
+    """GeckoTerminal 请求已禁用，始终返回空 K线。"""
+    return []
 
 
 def gt_ohlcv_1min(token_address: str, limit: int = 30) -> list[list]:
-    """拿 1 分钟 K线 (用于假阳线死线检测, 需要细粒度数据)"""
-    url = f"{GT_BASE}/networks/bsc/pools/{token_address}/ohlcv/minute?aggregate=1&limit={limit}"
-    data = _gt_request(url)
-    if not data:
-        return []
-    return (data.get("data", {}).get("attributes", {}).get("ohlcv_list", []))
+    """GeckoTerminal 请求已禁用，始终返回空 K线。"""
+    return []
 
 
 def check_kline_defense(token_address: str, gt_pool_addr: str, current_price: float,
                         progress: float, age_hours: float) -> tuple[bool, str | None, dict | None]:
-    """
-    K 线防线检查 (精筛后防线)
-
-    对每个候选代币获取 48 小时内所有 15 分钟 K 线，执行以下检查:
-    1. 无K线数据时跳过K线相关检查、直接放行 (不影响推送和开仓)
-    2. 防追高: 当前价格不大于前一根K线开盘价的50%，不大于前前根开盘价的100%
-    3. 最高价到当前价格跌幅不大于 70%
-
-    注意: 获取K线必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
-
-    参数:
-        token_address: 代币地址
-        gt_pool_addr: GeckoTerminal 池子地址 (已弃用，直接从API获取)
-        current_price: 当前价格
-        progress: 当前进度 (0~1)
-        age_hours: 币龄 (小时)
-
-    返回:
-        (passed, fail_reason, kline_data): 是否通过检查, 失败原因, K线数据字典
-    """
-    # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
-    log.info("从 GT 获取最大流动性 pool 地址 [%s]", token_address[:16])
-    gt_pool_from_api = gt_get_pool_address(token_address)
-    
-    query_addr = None
-    used_pool_addr = None
-    
-    if gt_pool_from_api:
-        normalized = _normalize_address(gt_pool_from_api)
-        if normalized:
-            log.info("使用 GT 获取的 pool 地址查询 K线: %s", normalized[:16])
-            query_addr = normalized
-            used_pool_addr = normalized
-        else:
-            log.warning("GT 返回的 pool 地址无法规范化: %s", gt_pool_from_api)
-    else:
-        log.warning("GT 无法获取 pool 地址 [%s]", token_address[:16])
-    
-    # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gt_pool_addr 或代币地址（降级方案）
-    if not query_addr:
-        if gt_pool_addr and _normalize_address(gt_pool_addr):
-            log.warning("降级: 使用传入的 gtPoolAddress [%s]", gt_pool_addr[:16])
-            query_addr = _normalize_address(gt_pool_addr)
-            used_pool_addr = gt_pool_addr
-        else:
-            log.warning("降级: 使用代币地址查询 K线 [%s]", token_address[:16])
-            query_addr = _normalize_address(token_address) or token_address
-            used_pool_addr = None
-    
-    # 48 小时 = 48 * 4 = 192 根 15 分钟 K 线
-    candles = gt_ohlcv_15min(query_addr, limit=192)
-    
-    if not candles or len(candles) == 0:
-        log.info("K线查询失败: [%s] 无数据 (query_addr=%s, pool_addr=%s)", 
-                 token_address[:16], query_addr[:16], 
-                 used_pool_addr[:16] if used_pool_addr else "None")
-        return (True, "K线数据缺失(已放行)", {"_kline_missing": True, "reason": "无K线数据"})
-    
-    # K 线格式: [timestamp, open, high, low, close, volume]
-    # 按时间正序排列 (GT 返回的是时间倒序，最新的在前)
-    candles = list(reversed(candles))
-    
-    # 提取所有 K 线数据
-    opens = [c[0] for c in candles if c[0] > 0]  # open
-    highs = [c[1] for c in candles if c[1] > 0]  # high
-    lows = [c[2] for c in candles if c[2] > 0]   # low
-    closes = [c[3] for c in candles if c[3] > 0] # close
-    volumes = [c[4] for c in candles if c[4] >= 0]  # volume
-    
-    if not highs or not lows or not closes:
-        return (True, "K线数据不完整(已放行)", {"_kline_missing": True, "reason": "K线数据不完整"})
-    
-    highest_price = max(highs)
-    lowest_price = min(lows)
-    
-    # K 线数据汇总 (返回给调用方使用)
-    kline_data = {
-        "candles": candles,
-        "highest": highest_price,
-        "lowest": lowest_price,
-        "count": len(candles),
-    }
-    
-    # --- 检查 1: 防追高 (对所有代币) ---
-    # 需要至少 2 根 K 线
-    if len(candles) >= 2:
-        prev1_open = candles[-2][0]  # 前一根开盘价
-        if prev1_open > 0 and current_price > 0:
-            gain_prev1 = current_price / prev1_open - 1
-            if gain_prev1 > FILTER_MAX_GAIN_PREV1:
-                return (False, f"相对前K涨幅{gain_prev1*100:.0f}%>{FILTER_MAX_GAIN_PREV1*100:.0f}%", kline_data)
-        
-        # 需要至少 3 根 K 线检查前前根
-        if len(candles) >= 3:
-            prev2_open = candles[-3][0]  # 前前根开盘价
-            if prev2_open > 0 and current_price > 0:
-                gain_prev2 = current_price / prev2_open - 1
-                if gain_prev2 > FILTER_MAX_GAIN_PREV2:
-                    return (False, f"相对前前K涨幅{gain_prev2*100:.0f}%>{FILTER_MAX_GAIN_PREV2*100:.0f}%", kline_data)
-    
-    # --- 检查 3: 最高价到当前价格跌幅不大于 70% ---
-    if highest_price > 0 and current_price > 0:
-        drawdown = (highest_price - current_price) / highest_price
-        if drawdown > FILTER_MAX_DRAWDOWN_FROM_HIGH:
-            return (False, f"从最高价跌{drawdown*100:.0f}%>{FILTER_MAX_DRAWDOWN_FROM_HIGH*100:.0f}%", kline_data)
-    
-    # --- 检查 4: 假阳线检测 (只用 15 分钟 K 线) ---
-    # 特征: 第一根 K 线涨幅巨大实体柱、影线短、后续 K 线无振幅
-    # 这种币 100% 会在后续一根 K 线直接归零
-    if len(candles) >= 3:
-        first_candle = candles[0]
-        first_open = first_candle[0]
-        first_high = first_candle[1]
-        first_low = first_candle[2]
-        first_close = first_candle[3]
-        
-        if first_open > 0 and first_close > 0:
-            # 第一根 K 线涨幅
-            first_gain = (first_close - first_open) / first_open
-            
-            # 实体柱长度 (相对开盘价)
-            body_ratio = abs(first_close - first_open) / first_open
-            
-            # 影线长度 (相对实体)
-            upper_wick = first_high - max(first_open, first_close)
-            lower_wick = min(first_open, first_close) - first_low
-            body_len = abs(first_close - first_open)
-            wick_ratio = (upper_wick + lower_wick) / body_len if body_len > 0 else 0
-            
-            # 后续 K 线振幅
-            later_amplitudes = []
-            for i in range(1, min(len(candles), 6)):  # 检查后续 5 根 K 线
-                c = candles[i]
-                if c[0] > 0:  # open > 0
-                    amp = (c[1] - c[2]) / c[0]  # (high - low) / open
-                    later_amplitudes.append(amp)
-            
-            avg_later_amp = sum(later_amplitudes) / len(later_amplitudes) if later_amplitudes else 0
-            
-            # 假阳线判定: 第一根涨幅 > 100%，实体占比 > 80%，后续振幅 < 10%
-            if first_gain > 1.0 and wick_ratio < 0.2 and avg_later_amp < 0.1:
-                return (False, f"假阳线(首K涨{first_gain*100:.0f}%,影线短,后续无振幅)", kline_data)
-    
-    return (True, None, kline_data)
+    """K线防线已禁用，避免所有 GeckoTerminal 请求。"""
+    return (True, "K线检查已禁用", {"_kline_missing": True, "reason": "GT请求已禁用"})
 
 
 def gt_batch_peak_prices(tokens: list[dict]) -> dict[str, dict]:
-    """
-    批量查询 GeckoTerminal 15 分钟 K线, 提取每个代币的最高价/最低价/振幅
-    用于:
-      1. 补充 peakPrice (扫描间隔内的价格冲高不会被 DexScreener 实时价捕获)
-      2. 检测过山车行情 (klineHigh/klineLow 比值过大 = 已被炒过一轮)
-      3. 检测单根K线暴跌 (maxCandleDrop > 40% = 过山车币, 暴涨后暴跌风险大)
-    OHLCV 格式: [timestamp, open, high, low, close, volume]
-      c[1] = open, c[2] = high, c[3] = low, c[4] = close
-
-    K线数量策略:
-      - 首次查询 (无 klineFixed 标记): 拉 24 根 (6h), 覆盖历史冲高
-      - 后续轮次 (已有 klineFixed 标记): 拉 4 根 (1h), 只补上一轮间隔的遗漏
-    限流策略: 3 线程并发 + 令牌桶限流 (~30 req/min), 遇 429 动态降速
-
-    返回: {address: {"high": float, "low": float, "maxCandleDrop": float}}
-        maxCandleDrop: 所有K线中单根最大跌幅 (close/open-1, 负值), 如 -0.45 表示某根K线跌45%
-    """
-    result = {}
-    if not tokens:
-        return result
-
-    # 令牌桶限流: 控制全局请求速率, 避免触发 GT 30 req/min 限制
-    import threading
-    _lock = threading.Lock()
-    _min_interval = 1.0  # 初始间隔 1.0s (~30 req/min, 踩线但有 429 退避兜底)
-    _last_req_time = [0.0]  # 用列表以便闭包内修改
-    _interval = [_min_interval]
-
-    def _rate_wait():
-        """等待直到可以发送下一个请求"""
-        with _lock:
-            now = time.time()
-            elapsed = now - _last_req_time[0]
-            if elapsed < _interval[0]:
-                time.sleep(_interval[0] - elapsed)
-            _last_req_time[0] = time.time()
-
-    def _on_429():
-        """遇到 429 时增大间隔"""
-        with _lock:
-            _interval[0] = min(5.0, _interval[0] + 0.5)
-
-    def _on_success():
-        """成功时缓慢恢复间隔"""
-        with _lock:
-            _interval[0] = max(_min_interval, _interval[0] - 0.1)
-
-    def _query_one(t: dict) -> tuple[str, dict | None]:
-        token_addr = t["address"]
-        limit = 4 if t.get("klineFixed") else 24
-        
-        # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
-        log.debug("K线查询: 从 GT 获取最大流动性 pool 地址 [%s]", token_addr[:16])
-        _rate_wait()  # 获取 pool 地址前也需限流
-        pool_addr = gt_get_pool_address(token_addr)
-        
-        # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
-        if not pool_addr:
-            pool_addr = t.get("gtPoolAddress")
-            if pool_addr and _normalize_address(pool_addr):
-                log.debug("K线查询: 降级使用 gtPoolAddress [%s] -> [%s]", token_addr[:16], pool_addr[:16])
-            else:
-                log.debug("K线查询: 降级使用代币地址 [%s]", token_addr[:16])
-                pool_addr = token_addr
-        
-        # 规范化地址（处理包含来源标识、缺少0x前缀等异常格式）
-        normalized_addr = _normalize_address(pool_addr)
-        if normalized_addr:
-            pool_addr = normalized_addr
-        else:
-            normalized_addr = _normalize_address(token_addr)
-            if normalized_addr:
-                pool_addr = normalized_addr
-                log.warning("K线查询: pool地址无效，使用代币地址 %s", pool_addr[:16])
-            else:
-                log.warning("K线查询: 代币地址也无法规范化 [%s]", token_addr[:16])
-                return token_addr, None
-        
-        _rate_wait()
-        try:
-            candles = gt_ohlcv_15min(pool_addr, limit=limit)
-            if candles:
-                _on_success()
-                high = max(float(c[2]) for c in candles)
-                lows = [float(c[3]) for c in candles if float(c[3]) > 0]
-                low = min(lows) if lows else 0
-                drops = []
-                for c in candles:
-                    o = float(c[1])
-                    cl = float(c[4])
-                    if o > 0:
-                        drops.append((cl - o) / o)
-                max_candle_drop = min(drops) if drops else 0.0
-                if high > 0:
-                    # 保存所有K线数据 (用于成交额异动检测, 需要对比前6根)
-                    all_candles = []
-                    for c in candles:
-                        all_candles.append({
-                            "o": float(c[1]),
-                            "c": float(c[4]),
-                            "v": float(c[5]),
-                        })
-                    return token_addr, {"high": high, "low": low, "maxCandleDrop": max_candle_drop,
-                                  "klineCandles": all_candles}
-            else:
-                _on_success()
-        except Exception as e:
-            log.debug("GT K线查询失败 [%s]: %s", token_addr[:16], e)
-        return token_addr, None
-
-    # 3 线程并发查询, 令牌桶控制全局速率
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(_query_one, t) for t in tokens]
-        for f in as_completed(futures):
-            addr, data = f.result()
-            if data:
-                result[addr] = data
-
-    return result
+    """K线峰值修正已禁用，避免所有 GeckoTerminal 请求。"""
+    return {}
 
 
 def detect_fake_candles(candles: list[list], candles_1m: list[list] | None = None) -> dict:
@@ -3842,9 +3334,7 @@ def elimination_check(queue: list[dict], now_ms: int,
         flap_states = flap_future.result()
         flap_social_map = flap_social_future.result()
 
-    # GT 补充数据已移到精筛后执行 (避免淘汰阶段大量 GT 调用触发 429)
-    # 原逻辑: 为 flap 代币补充 GT 数据 (DexScreener 对 flap 代币数据不完整)
-    # 现在只在精筛通过的小批量代币上补充
+    # GT 补充数据已禁用，淘汰阶段仅使用 DexScreener/detail/BSCScan/flap 链上状态。
 
     # 3. 逐个检查淘汰条件
     for t in pre_filtered:
@@ -3968,7 +3458,7 @@ def elimination_check(queue: list[dict], now_ms: int,
         if ds:
             t["name"] = ds.get("name") or t.get("name", "")
             t["symbol"] = ds.get("symbol") or t.get("symbol", "")
-            # 记录 GT 池子地址 (用于 GT K线查询, 部分代币 tokenAddress ≠ poolAddress)
+            # 记录交易对地址 (来自 DexScreener, 仅供展示/兼容旧字段)
             ds_pool = ds.get("pairAddress", "")
             normalized_pool = _normalize_address(ds_pool)
             if normalized_pool:
@@ -4598,12 +4088,15 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
+    progress_hist = [_quality_float(v) for v in (t.get("progressHistory") or [])]
+    scan_count = int(_quality_float(t.get("scanCount"), 0))
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
         "holders": holders,
         "price": current_price,
+        "scan_count": scan_count,
     }
 
     if age_hours < 0:
@@ -4614,6 +4107,14 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     if progress < QUALITY_MIN_PROGRESS:
         return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
     base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
+    if scan_count > 1 and len(progress_hist) >= 2:
+        prev_progress = progress_hist[-2]
+        metrics["prev_progress"] = prev_progress
+        if progress < prev_progress:
+            return False, (
+                f"进度倒退 ({prev_progress*100:.1f}%→{progress*100:.1f}%)"
+            ), base_tags, metrics
+        base_tags.append("进度不倒退")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
@@ -4968,6 +4469,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 币龄 <= 1h
       - 进度 >= 40%
       - 持币 >= 5
+      - 非首轮扫描时，本轮进度 >= 上轮进度
     """
     results = []
 
@@ -5064,39 +4566,7 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
             except Exception as e:
                 log.debug("开发者行为查询失败 %s: %s", name, e)
 
-        # 3. 假K线检测 (GeckoTerminal 15min + 1min K线)
-        # 特征 A/B: 15min K线全是实体柱无影线 / 全阳线 = 价格被控制
-        # 特征 C: 1min K线头部脉冲 + 后续全是死线 = 拉盘后无人接盘
-        if not exclude_reason:
-            try:
-                # 必须先用 GeckoTerminal Token Pools API 获取流动性最大的池子地址
-                log.debug("假K线检测: 从 GT 获取最大流动性 pool 地址 [%s]", addr[:16])
-                kline_query_addr = gt_get_pool_address(addr)
-                
-                # 如果无法从 GT 获取 pool 地址，才尝试使用传入的 gtPoolAddress 或代币地址（降级方案）
-                if not kline_query_addr:
-                    kline_query_addr = t.get("gtPoolAddress")
-                    if kline_query_addr and _normalize_address(kline_query_addr):
-                        log.debug("假K线检测: 降级使用 gtPoolAddress [%s] -> [%s]", addr[:16], kline_query_addr[:16])
-                    else:
-                        log.debug("假K线检测: 降级使用代币地址 [%s]", addr[:16])
-                        kline_query_addr = addr
-                
-                # 规范化地址
-                normalized_addr = _normalize_address(kline_query_addr)
-                if normalized_addr:
-                    kline_query_addr = normalized_addr
-                else:
-                    kline_query_addr = addr
-                
-                candles_15m = gt_ohlcv_15min(kline_query_addr, limit=12)  # 最近 3 小时的 15min K线
-                candles_1m = gt_ohlcv_1min(kline_query_addr, limit=30)    # 最近 30 根 1min K线
-                fake_result = detect_fake_candles(candles_15m, candles_1m)
-                t["fakeCandle"] = fake_result
-                if fake_result["fake"]:
-                    exclude_reason = "假K线 ({} — 控盘刷量)".format(fake_result["reason"])
-            except Exception as e:
-                log.debug("假K线检测失败 %s: %s", name, e)
+        # 3. 假K线检测依赖 GeckoTerminal K线，GT 请求已禁用，跳过。
 
         if exclude_reason:
             log.info("  精筛后防线: ✗ %s — %s", name, exclude_reason)
@@ -5283,7 +4753,7 @@ def fetch_scanner_quality_tokens() -> tuple[list[dict], str]:
     """
     _ensure_sessions()
     try:
-        resp = _gt_session.get(SCANNER_LATEST_URL, timeout=10)
+        resp = _http_session.get(SCANNER_LATEST_URL, timeout=10)
         if resp.status_code != 200:
             log.info("拉取 scanner 精筛结果: HTTP %d, 跳过", resp.status_code)
             return [], ""
@@ -5587,7 +5057,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h && 进度>=40% && 持币>=5)
+    # 精筛 (币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
@@ -5618,84 +5088,7 @@ def scan_once(cfg: dict) -> dict:
                     log.info("  持币数刷新 %s: %d→%d (BSCScan)",
                              t.get("name") or t["address"][:16], old_h, rh)
 
-    # 精筛后补充 GT 数据: 仅对精筛通过的少量代币补充 h1 数据 (flap 代币普遍缺 h1)
-    # 避免 429: 只在精筛通过的小批量代币上调用 GT API
-    if quality_results:
-        flap_quality_addrs = [t["address"] for t in quality_results 
-                              if t.get("source") == "flap" 
-                              and (t.get("priceChangeH1", 0) == 0 or t.get("buysH1", 0) == 0)]
-        if flap_quality_addrs:
-            log.info("精筛GT补充: 查询 %d 个 flap 代币 h1 数据...", len(flap_quality_addrs))
-            gt_data = gt_batch_token_info(flap_quality_addrs)
-            if gt_data:
-                for t in quality_results:
-                    gt_info = gt_data.get(t["address"])
-                    if gt_info:
-                        # 补充 h1 涨跌幅和买卖笔数
-                        if t.get("priceChangeH1", 0) == 0 and gt_info.get("priceChangeH1", 0) != 0:
-                            t["priceChangeH1"] = gt_info["priceChangeH1"]
-                        if t.get("buysH1", 0) == 0 and gt_info.get("buysH1", 0) != 0:
-                            t["buysH1"] = gt_info["buysH1"]
-                            t["sellsH1"] = gt_info.get("sellsH1", 0)
-                        if t.get("volumeH1", 0) == 0 and gt_info.get("volumeH1", 0) != 0:
-                            t["volumeH1"] = gt_info["volumeH1"]
-                        # 同步 gtPoolAddress (GT 返回的 pairAddress)
-                        gt_pool = gt_info.get("pairAddress", "")
-                        if gt_pool and not t.get("gtPoolAddress"):
-                            t["gtPoolAddress"] = gt_pool
-                        # 同步到 survivors
-                        for s in survivors:
-                            if s["address"] == t["address"]:
-                                if gt_info.get("priceChangeH1", 0) != 0:
-                                    s["priceChangeH1"] = gt_info["priceChangeH1"]
-                                if gt_info.get("buysH1", 0) != 0:
-                                    s["buysH1"] = gt_info["buysH1"]
-                                    s["sellsH1"] = gt_info.get("sellsH1", 0)
-                                if gt_info.get("volumeH1", 0) != 0:
-                                    s["volumeH1"] = gt_info["volumeH1"]
-                                if gt_pool and not s.get("gtPoolAddress"):
-                                    s["gtPoolAddress"] = gt_pool
-                                break
-
-    # 精筛代币K线修正: 仅对精筛通过的少量代币拉 GT K线
-    # 用 K线 high/low 补充 peakPrice, 并记录 klineHigh/klineLow 供过山车检测
-    # 同时记录 klineMaxDrop (单根K线最大跌幅) 供过山车暴跌检测
-    if quality_results:
-        log.info("精筛K线修正: 查询 %d 个代币...", len(quality_results))
-        kline_data = gt_batch_peak_prices(quality_results)
-        for t in quality_results:
-            kd = kline_data.get(t["address"])
-            if kd:
-                kline_high = kd["high"]
-                kline_low = kd["low"]
-                kline_max_drop = kd.get("maxCandleDrop", 0)
-                old_peak = t.get("peakPrice", 0)
-                if kline_high > old_peak:
-                    t["peakPrice"] = kline_high
-                    for s in survivors:
-                        if s["address"] == t["address"]:
-                            s["peakPrice"] = kline_high
-                            break
-                    log.info("  K线修正 %s: peakPrice %.2e → %.2e (+%.0f%%)",
-                             t.get("name") or t["address"][:16],
-                             old_peak, kline_high,
-                             (kline_high / old_peak - 1) * 100 if old_peak > 0 else 0)
-                t["klineHigh"] = kline_high
-                t["klineLow"] = kline_low
-                t["klineMaxDrop"] = kline_max_drop
-                t["klineFixed"] = True
-                kline_candles_data = kd.get("klineCandles", [])
-                if kline_candles_data:
-                    t["klineCandles"] = kline_candles_data
-                for s in survivors:
-                    if s["address"] == t["address"]:
-                        s["klineHigh"] = kline_high
-                        s["klineLow"] = kline_low
-                        s["klineMaxDrop"] = kline_max_drop
-                        s["klineFixed"] = True
-                        if kline_candles_data:
-                            s["klineCandles"] = kline_candles_data
-                        break
+    # GT 补充数据和 K线修正已禁用，避免所有 GeckoTerminal 请求。
 
     # 精筛再验证: K线更新后重新检查淘汰条件 + 精筛条件
     # - 不符合队列存活 → 移到本轮淘汰
@@ -5895,11 +5288,6 @@ def scan_once(cfg: dict) -> dict:
 
     # 推送精筛结果 (代币详情, 不管是否开自动交易都推)
     # _bonus_score 仅作兼容字段；通过当前三条件精筛即可推送/买入
-    # K线数据仅用于展示，无K线不影响推送和开仓
-    kline_results = [t for t in quality_results_for_dingding if not t.get("_kline_missing")]
-    no_kline_count = len(quality_results_for_dingding) - len(kline_results)
-    if no_kline_count > 0:
-        log.info("K线数据: %d 个有K线, %d 个无K线 (不影响推送)", len(kline_results), no_kline_count)
 
     # 过滤: 只推送通过当前精筛策略的代币，确保推送和买入条件一致
     bonus_filtered = quality_results_for_dingding
@@ -6110,7 +5498,7 @@ def output_scan_json(queue_state: dict, eliminated_this_round: list = None,
 
 
 def main():
-    global _fm_session, _gt_session, _bsc_session
+    global _fm_session, _http_session, _bsc_session
     log.info("🚀 BSC Token Scanner v6 极速版启动")
     log.info("配置文件: %s", CONFIG_PATH)
 
@@ -6143,7 +5531,7 @@ def main():
         try:
             cfg = load_config()
             _fm_session = _build_session(cfg.get("proxy"), FM_HEADERS)
-            _gt_session = _build_session(cfg.get("proxy"), GT_HEADERS)
+            _http_session = _build_session(cfg.get("proxy"))
             _bsc_session = _build_session(cfg.get("proxy"), DS_HEADERS)
             _maybe_clean_logs()  # 每天清理一次旧日志
             scan_once(cfg)

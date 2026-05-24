@@ -23,10 +23,9 @@ from scanner import (
     _build_session,
     _maybe_clean_logs,
     _fm_session,
-    _gt_session,
+    _http_session,
     _bsc_session,
     FM_HEADERS,
-    GT_HEADERS,
     DS_HEADERS,
     scan_once,
     save_queue,
@@ -43,13 +42,13 @@ log = logging.getLogger(__name__)
 
 
 def main():
-    global _fm_session, _gt_session, _bsc_session
+    global _fm_session, _http_session, _bsc_session
     log.info("🚀 BSC Token Scanner - GitHub Actions 模式 (单次扫描)")
 
     try:
         cfg = load_config()
         _fm_session = _build_session(cfg.get("proxy"), FM_HEADERS)
-        _gt_session = _build_session(cfg.get("proxy"), GT_HEADERS)
+        _http_session = _build_session(cfg.get("proxy"))
         _bsc_session = _build_session(cfg.get("proxy"), DS_HEADERS)
         _maybe_clean_logs()
 
