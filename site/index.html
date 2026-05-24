@@ -2235,7 +2235,7 @@
             <span class="flow-num">4</span>
             <div>
               <div class="flow-title">条件精筛 (瞬时)</div>
-              <div class="flow-desc">从队列存活币中筛选币龄≤1h、进度≥40%、持币≥5的代币</div>
+              <div class="flow-desc">从队列存活币中筛选币龄≤1h、进度≥20%、持币≥5的代币</div>
             </div>
           </div>
         </div>
@@ -2274,7 +2274,7 @@
       </p>
       <ul class="about-list">
         <li>币龄 ≤ 1h</li>
-        <li>进度 ≥ 40%</li>
+        <li>进度 ≥ 20%</li>
         <li>持币数 ≥ 5</li>
         <li>非首轮扫描时，本轮进度 ≥ 上轮进度</li>
         <li>Top10 持仓 ≤ 30%</li>
@@ -2725,45 +2725,8 @@
       if (mobileDetail) mobileDetail.textContent = detailText;
     }
 
-    
 
-// --- Auto Refresh (polling) ---
-let lastScanTime = null;
-let autoRefreshTimer = null;
-const AUTO_REFRESH_INTERVAL = 60 * 1000;
-
-function startAutoRefresh() {
-  if (autoRefreshTimer) return;
-  autoRefreshTimer = setInterval(async () => {
-    if (searchMode || activeHistoryId != null) return;
-    try {
-      const data = await cachedFetch('data/latest.json', true);
-      if (data.scanTime && data.scanTime !== lastScanTime) {
-        lastScanTime = data.scanTime;
-        renderData(data);
-        if (isDesktop()) await renderHistoryList('historyListDesktop', true);
-        if (historyVisible) await renderHistoryList('historyList', true);
-        showToast('数据已更新');
-      }
-    } catch(e) { console.error(e); }
-  }, AUTO_REFRESH_INTERVAL);
-  const btn = document.getElementById('btnAutoRefresh');
-  if (btn) { btn.textContent = '自动刷新: ON'; btn.style.borderColor = 'var(--accent)'; }
-}
-
-function stopAutoRefresh() {
-  if (!autoRefreshTimer) return;
-  clearInterval(autoRefreshTimer);
-  autoRefreshTimer = null;
-  const btn = document.getElementById('btnAutoRefresh');
-  if (btn) { btn.textContent = '自动刷新: OFF'; btn.style.borderColor = ''; }
-}
-
-function toggleAutoRefresh() {
-  autoRefreshTimer ? stopAutoRefresh() : startAutoRefresh();
-}
-
-function setActiveTab(tab) {
+    function setActiveTab(tab) {
       currentTab = tab;
       document.querySelectorAll('#tabBar .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
       document.getElementById('tokenTable').classList.toggle('hidden', tab !== 'filtered');
@@ -2782,7 +2745,7 @@ function setActiveTab(tab) {
       else if (currentTab === 'rejected') renderRejected(currentData);
     }
 
-function renderData(data, options = {}) {
+    function renderData(data, options = {}) {
       currentData = data;
       if (options.focusTab) setActiveTab(options.focusTab);
       document.getElementById('scanTime').textContent = data.scanTime || '--';

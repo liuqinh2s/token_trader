@@ -7,12 +7,12 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退
+  4. 精筛 (瞬时): 币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   - 币龄 <= 1h
-  - 进度 >= 40%
+  - 进度 >= 20%
   - 持币 >= 5
 
 砍掉的慢环节 (v5 → v6):
@@ -37,7 +37,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退
+  币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -252,9 +252,9 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退 ---
+# --- 当前精筛策略: 币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退 ---
 QUALITY_MAX_AGE_HOURS = 1.0
-QUALITY_MIN_PROGRESS = 0.40
+QUALITY_MIN_PROGRESS = 0.20
 QUALITY_MIN_HOLDERS = 5
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
@@ -4467,7 +4467,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
     """
     精筛开仓策略:
       - 币龄 <= 1h
-      - 进度 >= 40%
+      - 进度 >= 20%
       - 持币 >= 5
       - 非首轮扫描时，本轮进度 >= 上轮进度
     """
@@ -5107,7 +5107,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h && 进度>=40% && 持币>=5 && 非首轮进度不倒退)
+    # 精筛 (币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
