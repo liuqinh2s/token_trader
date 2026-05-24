@@ -65,6 +65,7 @@ from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
 log = logging.getLogger(__name__)
+_last_buy_error = ""
 _last_sell_error = ""
 
 try:
@@ -389,6 +390,7 @@ _w3: Optional[Web3] = None
 _wallet_address: Optional[str] = None
 _private_key: Optional[str] = None
 _current_rpc_index: int = 0  # 当前使用的 RPC 索引
+_fm_sell_signature_cache: dict[str, str] = {}
 
 
 def _switch_rpc() -> bool:
@@ -950,6 +952,24 @@ def _build_contract_call_data(signature: str, arg_types: list[str], args: list) 
     return "0x" + selector + encoded_args
 
 
+def _is_rpc_transient_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(x in msg for x in (
+        "timed out",
+        "timeout",
+        "read timed",
+        "connection",
+        "temporarily unavailable",
+        "429",
+        "too many requests",
+    ))
+
+
+def _set_last_buy_error(message: str) -> None:
+    global _last_buy_error
+    _last_buy_error = message
+
+
 def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
                               token_name: str = "", quiet: bool = False) -> dict | None:
     """
@@ -976,7 +996,29 @@ def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
         ("sellToken(address,uint256,uint256,uint256)", ["address", "uint256", "uint256", "uint256"], [token_cs, amount, 0, 0]),
     ]
     gas_price = _w3.eth.gas_price
+    nonce = _w3.eth.get_transaction_count(_wallet_address)
     errors = []
+    transient_errors = 0
+    manager_key = manager_cs.lower()
+    cached_signature = _fm_sell_signature_cache.get(manager_key)
+
+    if cached_signature:
+        cached = next((c for c in candidates if c[0] == cached_signature), None)
+        if cached:
+            signature, arg_types, args = cached
+            data = _build_contract_call_data(signature, arg_types, args)
+            log.info("four.meme 卖出入口使用缓存签名 %s: %s",
+                     token_name or token_cs[:16], signature)
+            return {
+                "from": _wallet_address,
+                "to": manager_cs,
+                "data": data,
+                "value": 0,
+                "gas": DEFAULT_GAS_SWAP,
+                "gasPrice": gas_price,
+                "nonce": nonce,
+                "chainId": BSC_CHAIN_ID,
+            }
 
     for signature, arg_types, args in candidates:
         data = _build_contract_call_data(signature, arg_types, args)
@@ -990,7 +1032,7 @@ def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
             _w3.eth.call(call_tx)
             gas_estimate = _w3.eth.estimate_gas(call_tx)
             gas_limit = min(max(int(gas_estimate * 1.25), DEFAULT_GAS_SWAP), 1_200_000)
-            nonce = _w3.eth.get_transaction_count(_wallet_address)
+            _fm_sell_signature_cache[manager_key] = signature
             log.info("four.meme 卖出入口预检通过 %s: %s, gas=%d",
                      token_name or token_cs[:16], signature, gas_limit)
             return {
@@ -1005,9 +1047,26 @@ def fm_build_sell_transaction(manager_cs: str, token_cs: str, amount: int,
             }
         except Exception as e:
             errors.append(f"{signature}: {e}")
+            if _is_rpc_transient_error(e):
+                transient_errors += 1
 
     global _last_sell_error
     _last_sell_error = " | ".join(errors)
+    if transient_errors == len(candidates):
+        signature, arg_types, args = candidates[0]
+        data = _build_contract_call_data(signature, arg_types, args)
+        log.warning("four.meme 卖出入口预检全部 RPC 异常，跳过预检直接提交 %s: %s",
+                    token_name or token_cs[:16], signature)
+        return {
+            "from": _wallet_address,
+            "to": manager_cs,
+            "data": data,
+            "value": 0,
+            "gas": DEFAULT_GAS_SWAP,
+            "gasPrice": gas_price,
+            "nonce": nonce,
+            "chainId": BSC_CHAIN_ID,
+        }
     if not quiet:
         log.error("four.meme 卖出入口全部预检失败 %s amount=%d: %s",
                   token_name or token_cs[:16], amount, _last_sell_error)
@@ -1167,8 +1226,12 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
       - quote=USDT: 直接用 USDT 买
       - 其他/未知: 默认用 BNB 买
     """
+    global _last_buy_error
+    _last_buy_error = ""
+
     if not _w3 or not _wallet_address or not _private_key:
-        log.error("Web3/钱包未初始化")
+        _set_last_buy_error("Web3/钱包未初始化")
+        log.error(_last_buy_error)
         return None
 
     token_cs = Web3.to_checksum_address(token_address)
@@ -1177,7 +1240,8 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
         # 获取代币信息, 判断报价币
         info = fm_get_token_info(token_address)
         if info is None:
-            log.error("无法获取代币信息: %s", token_name)
+            _set_last_buy_error("无法获取代币信息")
+            log.error("%s: %s", _last_buy_error, token_name)
             return None
 
         manager_addr = info["tokenManager"]
@@ -1197,8 +1261,8 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
             # 检查 USDT 余额
             usdt_balance = get_usdt_balance()
             if usdt_balance < buy_usdt:
-                log.error("USDT 余额不足: 需要 %.2f USDT, 当前 %.2f USDT",
-                          buy_usdt, usdt_balance)
+                _set_last_buy_error(f"USDT 余额不足: 需要 {buy_usdt:.2f}, 当前 {usdt_balance:.2f}")
+                log.error(_last_buy_error)
                 return None
 
             amount_in_wei = int(buy_usdt * (10 ** USDT_DECIMALS))
@@ -1220,7 +1284,8 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
                 tx_hash = _w3.eth.send_raw_transaction(signed.raw_transaction)
                 receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
                 if receipt["status"] != 1:
-                    log.error("USDT Approve 失败")
+                    _set_last_buy_error(f"USDT Approve 失败: {tx_hash.hex()}")
+                    log.error(_last_buy_error)
                     return None
                 time.sleep(2)
 
@@ -1254,7 +1319,8 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
             bnb_before = get_bnb_balance()
             swapped = swap_usdt_to_bnb(buy_usdt, slippage_pct=0.5)
             if swapped is None:
-                log.error("USDT → BNB 换汇失败")
+                _set_last_buy_error("USDT → BNB 换汇失败")
+                log.error(_last_buy_error)
                 return None
             if swapped < buy_bnb * 0.98:  # 允许 2% 滑点偏差
                 log.warning("实际换得 BNB (%.6f) 少于预期 (%.6f), 调整买入金额",
@@ -1301,6 +1367,7 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
 
         receipt = _w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         if receipt["status"] != 1:
+            _set_last_buy_error(f"bonding curve 买入 tx status=0: {tx_hash.hex()}")
             log.error("bonding curve 买入失败: %s", tx_hash.hex())
             return None
 
@@ -1309,8 +1376,9 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
         decimals = token_contract.functions.decimals().call()
 
         if actual_received <= 0:
-            log.error("bonding curve 买入异常: TX 成功但未收到代币 %s (TX: %s)",
-                      token_name or token_address[:16], tx_hash.hex())
+            _set_last_buy_error(f"TX 成功但未收到代币: {tx_hash.hex()}")
+            log.error("bonding curve 买入异常: %s %s",
+                      token_name or token_address[:16], _last_buy_error)
             return None
 
         buy_price_usd = buy_usdt / (actual_received / 10**decimals)
@@ -1330,6 +1398,7 @@ def fm_buy_token(token_address: str, buy_usdt: float, slippage_pct: float = 12.0
         }
 
     except Exception as e:
+        _set_last_buy_error(str(e))
         log.error("bonding curve 买入异常 [%s]: %s", token_name or token_address[:16], e)
         return None
 
@@ -3337,9 +3406,11 @@ def execute_buys(tokens: list[tuple[dict, dict]], cfg: dict,
             bought_count += 1
         else:
             reason = f"交易执行失败 (venue={venue}, 金额=${buy_usdt:.2f})"
+            detail = _last_buy_error if _last_buy_error else ""
+            skipped_reason = f"交易执行失败: {detail[:160]}" if detail else "交易执行失败"
             log.error("买入失败 %s: %s", name, reason)
-            notify_buy_failed(cfg, name, addr, reason)
-            skipped_reasons.append((name, addr, "交易执行失败"))
+            notify_buy_failed(cfg, name, addr, f"{reason}, {detail}" if detail else reason)
+            skipped_reasons.append((name, addr, skipped_reason))
 
         time.sleep(2)  # 避免 nonce 冲突
 
