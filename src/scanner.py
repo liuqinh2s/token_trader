@@ -4515,60 +4515,43 @@ def post_quality_defense(candidates: list[dict], api_key: str,
                          cfg: dict | None = None) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
-    1. Top10 持仓集中度: BSCScan Top Holders → 占比 > 80% 排除 (庄家控盘)
+    1. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 80% 排除 (庄家控盘)
     2. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
     3. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
     """
     if not candidates:
         return candidates
 
-    if not api_key:
-        _notify_top10_missing(cfg or {}, [
-            (t.get("name") or t.get("address", "")[:16],
-             t.get("address", ""),
-             "未配置 bscscan_api_key")
-            for t in candidates
-        ])
-        return candidates
+    log.info("精筛后防线: 检查 %d 个代币 (币安Top10 + 开发者行为)...", len(candidates))
 
-    log.info("精筛后防线: 检查 %d 个代币 (Top Holder + 开发者行为)...", len(candidates))
+    addrs = [t.get("address", "") for t in candidates if t.get("address")]
+    binance_dynamic = fetch_binance_token_dynamic(addrs)
 
     results = []
     top10_missing: list[tuple[str, str, str]] = []
     for t in candidates:
         addr = t.get("address", "")
         name = t.get("name") or addr[:16]
+        symbol = t.get("symbol") or name
         creator = t.get("creator", "")
-        total_supply = t.get("totalSupply", TOTAL_SUPPLY)
         exclude_reason = None
 
-        # 1. Top10 持仓集中度检查
-        try:
-            top_holders = bscscan_top_holders(addr, api_key, offset=10)
-            if top_holders:
-                top10_total = 0
-                for h in top_holders:
-                    balance = int(h.get("TokenHolderQuantity", 0) or 0)
-                    holder_addr = (h.get("TokenHolderAddress") or "").lower()
-                    # 排除零地址/死地址/合约地址 (这些不算真实持仓)
-                    if holder_addr in BURN_ADDRESSES:
-                        continue
-                    top10_total += balance
-                if total_supply > 0:
-                    concentration = top10_total / total_supply
-                    t["top10Concentration"] = round(concentration, 4)
-                    if concentration > TOP10_CONCENTRATION_MAX:
-                        exclude_reason = "Top10持仓{:.0f}% (庄家控盘)".format(concentration * 100)
-                else:
-                    top10_missing.append((name, addr, "totalSupply 无效"))
+        # 1. Top10 持仓集中度检查 (币安 Web3)
+        dyn = binance_dynamic.get(addr.lower())
+        if dyn:
+            raw_top10 = float(dyn.get("top10Pct") or 0)
+            if raw_top10 > 0:
+                concentration = raw_top10 / 100 if raw_top10 > 1 else raw_top10
+                t["top10Concentration"] = round(concentration, 4)
+                if concentration > TOP10_CONCENTRATION_MAX:
+                    exclude_reason = "Top10持仓{:.0f}% (庄家控盘)".format(concentration * 100)
             else:
-                top10_missing.append((name, addr, "BSCScan 未返回 Top Holders"))
-        except Exception as e:
-            log.debug("Top Holder 查询失败 %s: %s", name, e)
-            top10_missing.append((name, addr, str(e)[:120]))
+                top10_missing.append((symbol, addr, "币安未返回 Top10 持仓占比"))
+        else:
+            top10_missing.append((symbol, addr, "币安动态数据不可用"))
 
         # 2. 开发者行为检查 (仅有 creator 地址时)
-        if not exclude_reason and creator:
+        if not exclude_reason and creator and api_key:
             try:
                 dev = analyze_developer_behavior(addr, creator, api_key)
                 if dev.get("exclude"):
@@ -4769,8 +4752,8 @@ def _notify_top10_missing(cfg: dict, missing: list[tuple[str, str, str]]) -> Non
         f"共 {len(missing)} 个精筛候选无法获取 Top10 持仓占比。",
         "",
     ]
-    for i, (name, addr, reason) in enumerate(missing, 1):
-        lines.append(f"{i}. **{name}**")
+    for i, (symbol, addr, reason) in enumerate(missing, 1):
+        lines.append(f"{i}. **{symbol}**")
         lines.append(f"   - 合约: `{addr}`")
         lines.append(f"   - 原因: {reason or '未知'}")
     lines.append("")
@@ -5033,19 +5016,20 @@ def scan_once(cfg: dict) -> dict:
 
     log.info("入队后: %d 个代币", len(queue_state["tokens"]))
 
-    # Step 2b: 新入队代币 Top Holders 采集 (数据积累, 供后续分析)
+    # Step 2b: 新入队代币 Top10 持仓占比采集 (币安 Web3, 数据积累)
     bscscan_key = cfg.get("bscscan_api_key", "")
-    if admitted and bscscan_key:
+    if admitted:
         new_addrs = [item["token"]["address"] for item in admitted]
-        log.info("Top Holders 采集: 查询 %d 个新入队代币...", len(new_addrs))
-        top_holders_map = bscscan_top_holders_batch(new_addrs, bscscan_key, top_n=10)
+        log.info("币安Top10持仓采集: 查询 %d 个新入队代币...", len(new_addrs))
+        bn_dynamic = fetch_binance_token_dynamic(new_addrs)
         # 写入队列数据
         for t in queue_state["tokens"]:
-            th = top_holders_map.get(t["address"])
-            if th is not None:
-                t["topHolders"] = th
-        if top_holders_map:
-            log.info("Top Holders 采集: %d/%d 个代币有数据", len(top_holders_map), len(new_addrs))
+            dyn = bn_dynamic.get(t["address"].lower())
+            if dyn and dyn.get("top10Pct", 0) > 0:
+                raw_top10 = float(dyn["top10Pct"])
+                t["top10Concentration"] = round(raw_top10 / 100 if raw_top10 > 1 else raw_top10, 4)
+        if bn_dynamic:
+            log.info("币安Top10持仓采集: %d/%d 个代币有数据", len(bn_dynamic), len(new_addrs))
 
     # Step 3: 淘汰检查
     log.info("\n--- Step 3: 淘汰检查 ---")
