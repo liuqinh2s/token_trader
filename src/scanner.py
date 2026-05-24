@@ -401,7 +401,7 @@ COPYCAT_BONUS_TIERS = [
 COPYCAT_MARK_MIN = 3    # 仿盘数 ≥3 在前端标记
 
 # --- 加分标签: TOP10 持仓占比 (用于淘汰/后防线, 非加分项) ---
-TOP10_CONCENTRATION_MAX = 0.80   # >80% 庄家控盘
+TOP10_CONCENTRATION_MAX = 0.30   # >30% 庄家控盘
 TOP10_CONCENTRATION_MIN = 0.20   # <20% 持仓太分散
 
 # --- 加分标签: 持币数 ≥1000 ---
@@ -4515,7 +4515,7 @@ def post_quality_defense(candidates: list[dict], api_key: str,
                          cfg: dict | None = None) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
-    1. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 80% 排除 (庄家控盘)
+    1. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 30% 排除 (庄家控盘)
     2. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
     3. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
     """
