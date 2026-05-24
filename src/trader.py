@@ -32,9 +32,9 @@ BNB 余额管理 (v18 新增):
   - 防止 BNB 价格波动导致资产缩水
 
 止盈止损策略:
-  1. 止盈: +100% 卖出全部剩余
-  2. 固定止损: 亏损 20% 止损
-  3. 时间止损: 买入 30 分钟内最高盈利没到 +15% 则卖出
+  1. 最高涨幅 <= 30% 时: 从最高价下跌 15% 止盈
+  2. 最高涨幅 >= 30% 时: 盈利回撤一半止盈
+  3. 超期卖出: 买入超过 15 分钟仍不赚钱则卖出
 
 旧版回撤/中点/10%分段止盈策略已备份为 check_sell_conditions_legacy_v18, 当前不参与卖出。
 
@@ -2930,7 +2930,10 @@ def check_sell_conditions(pos: dict, current_price: float,
                           cfg: dict,
                           momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
-    检查是否满足卖出条件 (v19: +100%清仓, -20%止损, 30分钟未达+15%清仓)
+    检查是否满足卖出条件:
+      - 最高涨幅 <=30%: 从最高价下跌15%止盈
+      - 最高涨幅 >=30%: 当前盈利回撤到最高盈利的一半止盈
+      - 持仓超过15分钟且当前不赚钱则卖出
 
     返回: (是否应该卖出, 卖出原因, 是否是部分止盈, 要卖出的比例 (0-1))
     """
@@ -2944,24 +2947,35 @@ def check_sell_conditions(pos: dict, current_price: float,
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else profit_pct
 
-    take_profit_full_pct = trading_cfg.get("take_profit_full_pct", 100)
-    stop_loss_pct = trading_cfg.get("stop_loss_pct", -20)
-    time_stop_minutes = trading_cfg.get("time_stop_minutes", 30)
-    time_stop_min_profit_pct = trading_cfg.get("time_stop_min_profit_pct", 15)
+    tp_midpoint_pct = trading_cfg.get("tp_midpoint_pct", 30)
+    tp_drawdown_pct = trading_cfg.get("tp_drawdown_pct", 15)
+    time_stop_minutes = trading_cfg.get("time_stop_minutes", 15)
 
-    if profit_pct >= take_profit_full_pct:
-        return True, (f"FULL_TP (止盈清仓: 当前盈利 {profit_pct:.0f}%, "
-                      f"阈值 {take_profit_full_pct:.0f}%, 卖出全部剩余)"), False, 1.0
-
-    if profit_pct <= stop_loss_pct:
-        return True, (f"STOP_LOSS (固定止损: 亏损 {profit_pct:.0f}%, "
-                      f"阈值 {stop_loss_pct:.0f}%)"), False, 1.0
+    if max_profit_pct > 0:
+        if max_profit_pct >= tp_midpoint_pct:
+            half_profit_pct = max_profit_pct / 2
+            half_profit_price = buy_price * (1 + half_profit_pct / 100)
+            if current_price <= half_profit_price:
+                return True, (
+                    f"HALF_PROFIT_TRAIL_TP (盈利回撤一半: 最高盈利 {max_profit_pct:.0f}%, "
+                    f"止盈线 {half_profit_pct:.0f}% (${half_profit_price:.12f}), "
+                    f"当前 {profit_pct:.0f}%)"
+                ), False, 1.0
+        else:
+            drawdown_price = max_price * (1 - tp_drawdown_pct / 100)
+            if current_price <= drawdown_price:
+                drawdown_profit_pct = (drawdown_price - buy_price) / buy_price * 100
+                return True, (
+                    f"TRAILING_TP_15 (回撤止盈: 最高盈利 {max_profit_pct:.0f}%, "
+                    f"从最高价下跌 {tp_drawdown_pct:.0f}% 至 ${drawdown_price:.12f} "
+                    f"({drawdown_profit_pct:.0f}%), 当前 {profit_pct:.0f}%)"
+                ), False, 1.0
 
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
     hold_minutes = hold_ms / (60 * 1000)
-    if hold_minutes >= time_stop_minutes and max_profit_pct < time_stop_min_profit_pct:
+    if hold_minutes >= time_stop_minutes and profit_pct <= 0:
         return True, (f"TIME_STOP (买入 {hold_minutes:.0f}m, "
-                      f"最高盈利 {max_profit_pct:.0f}% < {time_stop_min_profit_pct:.0f}%)"), False, 1.0
+                      f"当前不赚钱 {profit_pct:.0f}%)"), False, 1.0
 
     return False, "", False, 0.0
 
@@ -3450,12 +3464,11 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 hold_ms = int(time.time() * 1000) - pos["buy_time"]
                 hold_hours = hold_ms / (3600 * 1000)
                 hold_days = hold_hours / 24
-                time_stop_minutes = trading_cfg.get("time_stop_minutes", 30)
-                time_stop_min_profit_pct = trading_cfg.get("time_stop_min_profit_pct", 15)
+                time_stop_minutes = trading_cfg.get("time_stop_minutes", 15)
                 max_profit_pct = ((max_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
                 expire_tag = ""
-                if hold_ms >= time_stop_minutes * 60 * 1000 and max_profit_pct < time_stop_min_profit_pct:
-                    expire_tag = f" ⚠️{time_stop_minutes:.0f}m最高未达{time_stop_min_profit_pct:.0f}%"
+                if hold_ms >= time_stop_minutes * 60 * 1000 and profit_pct <= 0:
+                    expire_tag = f" ⚠️{time_stop_minutes:.0f}m不赚钱"
                 log.info("  %s [%s]: 当前 $%.12f | 买入 $%.12f | 最高 $%.12f | 盈亏 %+.1f%% | 持仓 %.1f天(%.0fh)%s",
                          name, venue, current_price, buy_price, max_price, profit_pct,
                          hold_days, hold_hours, expire_tag)

@@ -2204,7 +2204,7 @@
     </div>
     <div class="about-content">
       <h2>BSC Token Scanner</h2>
-      <p class="about-subtitle">链上发现 · 队列淘汰 · 标签精筛 · 极速 15min</p>
+      <p class="about-subtitle">链上发现 · 队列淘汰 · 条件精筛 · 极速 15min</p>
 
       <div class="about-section">
         <h3>🔍 扫描流程</h3>
@@ -2234,8 +2234,8 @@
           <div class="flow-step">
             <span class="flow-num">4</span>
             <div>
-              <div class="flow-title">标签精筛 (瞬时)</div>
-              <div class="flow-desc">从队列存活币中筛选基础标签全部满足，且至少命中一个加分标签的代币</div>
+              <div class="flow-title">条件精筛 (瞬时)</div>
+              <div class="flow-desc">从队列存活币中筛选币龄≤1h、进度≥40%、持币≥5的代币</div>
             </div>
           </div>
         </div>
@@ -2270,16 +2270,12 @@
     <div class="about-section">
       <h3>✅ 精筛条件</h3>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;">
-        当前精筛为基础标签全部满足，且至少命中一个加分标签才进入推荐和自动交易。
+        当前精筛为三项条件全部满足才进入推荐和自动交易。
       </p>
       <ul class="about-list">
-        <li>基础：持币数 ≥ 5</li>
-        <li>基础：价格 ≥ 0.000003</li>
-        <li>基础：本轮价格 &gt; 上轮价格</li>
-        <li>加分：进度异动（未毕业代币，本轮 - 上轮 ≥ 15个百分点）</li>
-        <li>加分：成交额异动（本轮成交额 ≥ 前6轮成交额之和，且本轮成交额 ≥ $1000）</li>
-        <li>加分：流动性异动（已毕业代币，本轮 ≥ 上轮 × 1.05，且本轮流动性 ≥ $15000）</li>
-        <li>加分：价格异动（本轮 ≥ 上轮 × 1.2）</li>
+        <li>币龄 ≤ 1h</li>
+        <li>进度 ≥ 40%</li>
+        <li>持币数 ≥ 5</li>
       </ul>
       <p style="font-size:11px;color:var(--text-secondary);margin-bottom:2px;margin-top:4px;line-height:1.5;">
         大盘情绪（Gas指数）仍在每轮计算并记录，仅用于数据分析，不作为精筛阻断条件。
