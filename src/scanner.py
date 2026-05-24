@@ -401,7 +401,7 @@ COPYCAT_BONUS_TIERS = [
 COPYCAT_MARK_MIN = 3    # 仿盘数 ≥3 在前端标记
 
 # --- 加分标签: TOP10 持仓占比 (用于淘汰/后防线, 非加分项) ---
-TOP10_CONCENTRATION_MAX = 0.85   # >85% 庄家控盘
+TOP10_CONCENTRATION_MAX = 0.80   # >80% 庄家控盘
 TOP10_CONCENTRATION_MIN = 0.20   # <20% 持仓太分散
 
 # --- 加分标签: 持币数 ≥1000 ---
@@ -4511,19 +4511,30 @@ def tag_filter(candidates: list[dict], now_ms: int,
     return results, []
 
 
-def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
+def post_quality_defense(candidates: list[dict], api_key: str,
+                         cfg: dict | None = None) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
-    1. Top10 持仓集中度: BSCScan Top Holders → 占比 > 85% 排除 (庄家控盘)
+    1. Top10 持仓集中度: BSCScan Top Holders → 占比 > 80% 排除 (庄家控盘)
     2. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
     3. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
     """
-    if not candidates or not api_key:
+    if not candidates:
+        return candidates
+
+    if not api_key:
+        _notify_top10_missing(cfg or {}, [
+            (t.get("name") or t.get("address", "")[:16],
+             t.get("address", ""),
+             "未配置 bscscan_api_key")
+            for t in candidates
+        ])
         return candidates
 
     log.info("精筛后防线: 检查 %d 个代币 (Top Holder + 开发者行为)...", len(candidates))
 
     results = []
+    top10_missing: list[tuple[str, str, str]] = []
     for t in candidates:
         addr = t.get("address", "")
         name = t.get("name") or addr[:16]
@@ -4548,8 +4559,13 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
                     t["top10Concentration"] = round(concentration, 4)
                     if concentration > TOP10_CONCENTRATION_MAX:
                         exclude_reason = "Top10持仓{:.0f}% (庄家控盘)".format(concentration * 100)
+                else:
+                    top10_missing.append((name, addr, "totalSupply 无效"))
+            else:
+                top10_missing.append((name, addr, "BSCScan 未返回 Top Holders"))
         except Exception as e:
             log.debug("Top Holder 查询失败 %s: %s", name, e)
+            top10_missing.append((name, addr, str(e)[:120]))
 
         # 2. 开发者行为检查 (仅有 creator 地址时)
         if not exclude_reason and creator:
@@ -4577,6 +4593,8 @@ def post_quality_defense(candidates: list[dict], api_key: str) -> list[dict]:
     excluded = len(candidates) - len(results)
     if excluded > 0:
         log.info("精筛后防线: 排除 %d 个, 通过 %d 个", excluded, len(results))
+    if top10_missing:
+        _notify_top10_missing(cfg or {}, top10_missing)
 
     return results
 
@@ -4731,6 +4749,35 @@ def send_dingtalk(webhook: str, secret: str, title: str, text: str) -> bool:
     except Exception as e:
         log.error("钉钉: %s", e)
         return False
+
+
+def _notify_top10_missing(cfg: dict, missing: list[tuple[str, str, str]]) -> None:
+    """Top10 持仓占比查不到时发送钉钉提醒。"""
+    if not missing:
+        return
+
+    webhook = cfg.get("dingtalk_webhook", "")
+    if not webhook or "YOUR" in webhook:
+        log.warning("Top10持仓查询失败但钉钉未配置: %d 个", len(missing))
+        return
+
+    secret = cfg.get("dingtalk_secret", "")
+    now_str = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M 北京时间")
+    lines = [
+        "## ⚠️ Top10持仓查询失败",
+        "",
+        f"共 {len(missing)} 个精筛候选无法获取 Top10 持仓占比。",
+        "",
+    ]
+    for i, (name, addr, reason) in enumerate(missing, 1):
+        lines.append(f"{i}. **{name}**")
+        lines.append(f"   - 合约: `{addr}`")
+        lines.append(f"   - 原因: {reason or '未知'}")
+    lines.append("")
+    lines.append(f"时间: {now_str}")
+
+    ok = send_dingtalk(webhook, secret, "Top10持仓查询失败", "\n".join(lines))
+    log.info("Top10持仓查询失败提醒%s", "成功" if ok else "失败")
 
 
 def print_console(msg: str) -> None:
@@ -5172,6 +5219,9 @@ def scan_once(cfg: dict) -> dict:
         log.info("精筛再验证: %d 个淘汰", demoted_to_elim)
     if demoted_from_quality > 0:
         log.info("精筛再验证: %d 个留队", demoted_from_quality)
+
+    # 精筛后防线: TOP10 持仓过度集中直接不通过精筛, 避免推送和自动买入。
+    quality_results = post_quality_defense(quality_results, bscscan_key, cfg)
 
     # 按进度、持币数排序
     quality_results.sort(
