@@ -16,10 +16,11 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   基础标签 (AND):
   - 持币数 >= 5
   - 价格 >= 0.000003
+  - 本轮价格 > 上轮价格
   加分标签 (OR):
   - 进度异动(未毕业代币): 本轮 - 上轮 >= 15个百分点
-  - 成交额异动: 本轮 - 上轮 >= 1000u
-  - 流动性异动(已毕业代币): 本轮 - 上轮 >= 5000u
+  - 成交额异动: 本轮成交额 >= 前6轮成交额之和, 且本轮成交额 >= 1000u
+  - 流动性异动(已毕业代币): 本轮 >= 上轮 * 1.05, 且本轮流动性 >= 15k
   - 价格异动: 本轮 >= 上轮 * 1.2
 
 砍掉的慢环节 (v5 → v6):
@@ -275,7 +276,8 @@ QUALITY_MIN_HOLDERS = 5
 QUALITY_MIN_PRICE = 0.000003
 QUALITY_PROGRESS_SURGE_MIN_DELTA = 0.15
 QUALITY_VOLUME_SURGE_MIN_USD = 1000
-QUALITY_LIQ_SURGE_MIN_DELTA = 5000
+QUALITY_LIQ_SURGE_MIN_PCT = 0.05
+QUALITY_LIQUIDITY_MIN_USD = 15000
 QUALITY_PRICE_SURGE_MIN_GAIN = 0.20
 
 # --- 旧硬筛参数: 保留给历史 helper/回滚对照 ---
@@ -291,8 +293,6 @@ QUALITY_HISTORY_MAX_DRAWDOWN = 0.35
 QUALITY_PROGRESS_SURGE_ROUNDS = 3
 QUALITY_PRICE_SURGE_ROUNDS = 3
 QUALITY_VOLUME_SURGE_PREV_ROUNDS = 6
-QUALITY_LIQ_SURGE_MIN_PCT = 0.05
-QUALITY_LIQUIDITY_MIN_USD = 10000
 
 # --- 旧价格形态精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_SIDEWAYS_WINDOW_HOURS = 24
@@ -4603,6 +4603,7 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
+    price_hist = _history_with_current(t, "priceHistory", "price")
     base_tags = []
     metrics = {
         "age_hours": age_hours,
@@ -4619,6 +4620,13 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     if current_price < QUALITY_MIN_PRICE:
         return False, f"价格{current_price:.2e}<{QUALITY_MIN_PRICE:.2e}", base_tags, metrics
     base_tags.append(f"价格≥{QUALITY_MIN_PRICE:g}")
+    if len(price_hist) < 2 or price_hist[-2] <= 0:
+        return False, "缺少上轮有效价格", base_tags, metrics
+    prev_price = price_hist[-2]
+    metrics["prev_price"] = prev_price
+    if current_price <= prev_price:
+        return False, f"价格未上涨 ({prev_price:.2e}→{current_price:.2e})", base_tags, metrics
+    base_tags.append("价格上涨")
 
     return True, "", base_tags, metrics
 
@@ -4629,7 +4637,6 @@ def _quality_bonus_tags(t: dict) -> tuple[int, list[str], dict]:
     prog_hist = _history_with_current(t, "progressHistory", "progress")
     price_hist = _history_with_current(t, "priceHistory", "price")
     liq_hist = _history_with_current(t, "liquidityHistory", "liquidity")
-    vol_hist = _history_with_current(t, "volumeHistory", "volume24h")
     bonus_tags = []
     metrics = {}
 
@@ -4640,22 +4647,25 @@ def _quality_bonus_tags(t: dict) -> tuple[int, list[str], dict]:
         if prog_delta >= QUALITY_PROGRESS_SURGE_MIN_DELTA:
             bonus_tags.append(f"进度异动(+{prog_delta*100:.0f}pp)")
 
-    # 2. 成交额异动: 本轮 - 上轮 >= 1000u
-    if len(vol_hist) >= 2:
-        vol_delta = vol_hist[-1] - vol_hist[-2]
-        metrics["volume_delta"] = vol_delta
-        if vol_delta >= QUALITY_VOLUME_SURGE_MIN_USD:
-            bonus_tags.append(f"成交额异动(+${vol_delta:.0f})")
+    # 2. 成交额异动: 本轮成交额 >= 前6轮成交额之和, 且本轮成交额 >= 1000u
+    vol_deltas = _volume_deltas(t)
+    if len(vol_deltas) >= QUALITY_VOLUME_SURGE_PREV_ROUNDS + 1:
+        current_vol = vol_deltas[-1]
+        prev_sum = sum(vol_deltas[-QUALITY_VOLUME_SURGE_PREV_ROUNDS - 1:-1])
+        metrics["volume_current"] = current_vol
+        metrics["volume_prev6_sum"] = prev_sum
+        if current_vol >= prev_sum and current_vol >= QUALITY_VOLUME_SURGE_MIN_USD:
+            bonus_tags.append(f"成交额异动(${current_vol:.0f}≥前6轮${prev_sum:.0f})")
 
-    # 3. 流动性异动: 已毕业代币本轮 - 上轮 >= 5000u
+    # 3. 流动性异动: 已毕业代币本轮 >= 上轮 * 1.05, 且本轮流动性 >= 15k
     if is_graduated and len(liq_hist) >= 2:
         liq_prev = liq_hist[-2]
         liq_cur = liq_hist[-1]
-        liq_delta = liq_cur - liq_prev
-        metrics["liquidity_delta"] = liq_delta
+        liq_gain = liq_cur / liq_prev - 1 if liq_prev > 0 else 0
+        metrics["liquidity_gain"] = liq_gain
         metrics["liquidity_current"] = liq_cur
-        if liq_delta >= QUALITY_LIQ_SURGE_MIN_DELTA:
-            bonus_tags.append(f"流动性异动(+${liq_delta:.0f})")
+        if liq_prev > 0 and liq_cur >= liq_prev * (1 + QUALITY_LIQ_SURGE_MIN_PCT) and liq_cur >= QUALITY_LIQUIDITY_MIN_USD:
+            bonus_tags.append(f"流动性异动(+{liq_gain*100:.0f}%, ${liq_cur:.0f})")
 
     # 4. 价格异动: 本轮 >= 上轮 * 1.2
     if len(price_hist) >= 2:
@@ -4968,11 +4978,12 @@ def tag_filter(candidates: list[dict], now_ms: int,
       基础标签全部满足:
       - 持币数 >= 5
       - 价格 >= 0.000003
+      - 本轮价格 > 上轮价格
 
       加分标签至少命中一项:
       - 进度异动(未毕业代币): 本轮 - 上轮 >= 15个百分点
-      - 成交额异动: 本轮 - 上轮 >= 1000u
-      - 流动性异动(已毕业代币): 本轮 - 上轮 >= 5000u
+      - 成交额异动: 本轮成交额 >= 前6轮成交额之和, 且本轮成交额 >= 1000u
+      - 流动性异动(已毕业代币): 本轮 >= 上轮 * 1.05, 且本轮流动性 >= 15k
       - 价格异动: 本轮 >= 上轮 * 1.2
     """
     results = []
