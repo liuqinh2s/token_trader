@@ -5034,7 +5034,26 @@ def scan_once(cfg: dict) -> dict:
     # Step 3: 淘汰检查
     log.info("\n--- Step 3: 淘汰检查 ---")
     bscscan_key = cfg.get("bscscan_api_key", "")
-    survivors, eliminated = elimination_check(queue_state["tokens"], now_ms, bscscan_key)
+    queue_for_elim = queue_state["tokens"]
+    queue_age_eliminated = []
+    if cfg.get("queue_recent_1h_only", False):
+        recent_survivors = []
+        for t in queue_for_elim:
+            age_hours = (now_ms - t.get("createdAt", 0)) / 3600000
+            if age_hours > 1:
+                queue_age_eliminated.append({
+                    **t,
+                    "eliminatedAt": now_ms,
+                    "elimReason": f"队列仅保留1h内: 币龄{_fmt_age(age_hours)}",
+                })
+            else:
+                recent_survivors.append(t)
+        if queue_age_eliminated:
+            log.info("淘汰: 队列仅保留1h内 %d 个", len(queue_age_eliminated))
+        queue_for_elim = recent_survivors
+    survivors, eliminated = elimination_check(queue_for_elim, now_ms, bscscan_key)
+    if queue_age_eliminated:
+        eliminated = queue_age_eliminated + eliminated
     queue_state["tokens"] = survivors
     queue_state["eliminated"].extend([{
         "address": e["address"], "name": e.get("name", ""),

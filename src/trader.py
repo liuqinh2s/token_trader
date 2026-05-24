@@ -2911,7 +2911,7 @@ def check_sell_conditions_legacy_v18(pos: dict, current_price: float,
                                      cfg: dict,
                                      momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
-    检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 中点止盈 + 固定止损 + 超期清仓)
+    检查是否满足卖出条件 (分段止盈 + 回撤止盈 + 中点止盈 + 超期清仓)
     返回: (是否应该卖出, 卖出原因, 是否是分段止盈, 要卖出的比例 (0-1))
 
     策略:
@@ -2923,8 +2923,7 @@ def check_sell_conditions_legacy_v18(pos: dict, current_price: float,
       2. 回撤止盈: 盈利达到 tp_trigger_pct 后触发跟踪
          - 触发~tp_midpoint_pct 区间: 从最高价回撤 tp_drawdown_pct 即卖出
          - tp_midpoint_pct 以上: 中点止盈法, 价格 ≤ (最高价 + 买入价) / 2
-      3. 固定止损: 亏损 25% 止损
-      4. 超期清仓: 持仓超过 24h 且亏损 → 卖出
+      3. 超期清仓: 持仓超过 24h 且亏损 → 卖出
 
     momentum: calc_momentum_signals() 的返回值 (当前版本已禁用)
     """
@@ -2986,12 +2985,6 @@ def check_sell_conditions_legacy_v18(pos: dict, current_price: float,
     if hold_hours >= expire_loss_hours and profit_pct < 0:
         return True, f"EXPIRE_LOSS (持仓 {hold_hours:.0f}h, 亏损 {profit_pct:.0f}%)", False, 1.0
 
-    # ==================== 策略3: 固定止损 ====================
-    stop_loss_pct = trading_cfg.get("stop_loss_pct", -25)
-
-    if profit_pct <= stop_loss_pct:
-        return True, (f"STOP_LOSS (亏损 {profit_pct:.0f}%, 阈值 {stop_loss_pct}%)"), False, 1.0
-
     return False, "", False, 0.0
 
 
@@ -3000,7 +2993,7 @@ def check_sell_conditions(pos: dict, current_price: float,
                           momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
     检查是否满足卖出条件:
-      - 最高涨幅 <=30%: 从最高价下跌15%止盈
+      - 买入后立即跟踪最高价, 最高涨幅 <=30% 时从最高价下跌15%止盈
       - 最高涨幅 >=30%: 当前盈利回撤到最高盈利的一半止盈
       - 持仓超过15分钟且当前不赚钱则卖出
 
@@ -3020,7 +3013,11 @@ def check_sell_conditions(pos: dict, current_price: float,
     tp_drawdown_pct = trading_cfg.get("tp_drawdown_pct", 15)
     time_stop_minutes = trading_cfg.get("time_stop_minutes", 15)
 
-    if max_profit_pct > 0:
+    if max_price <= 0:
+        max_price = buy_price
+        max_profit_pct = 0
+
+    if max_profit_pct >= 0:
         if max_profit_pct >= tp_midpoint_pct:
             half_profit_pct = max_profit_pct / 2
             half_profit_price = buy_price * (1 + half_profit_pct / 100)

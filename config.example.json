@@ -4,6 +4,7 @@
     "scan_interval_minutes": 15,
     "max_push_count": 100,
     "max_age_hours": 48,
+    "queue_recent_1h_only": false,
     "bscscan_api_key": "",
     "gmgn_api_key": "",
     "proxy": {
