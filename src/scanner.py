@@ -7,13 +7,18 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退
+  4. 精筛 (瞬时): 币龄>=2h && 价格回踩拉升 && 持币>=120 && 聪明钱>=3% && 仿盘>=5
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  - 币龄 <= 1h
-  - 进度 >= 20%
-  - 持币 >= 5
+  - 币龄 >= 2h
+  - 最高价 <= 0.00005
+  - 最高价到最低价跌幅 <= 40%
+  - 当前价 >= 最低价 * 1.1
+  - 0.000015 <= 当前价 <= 0.000035
+  - 持币 >= 120
+  - 聪明钱 >= 3%
+  - 仿盘 >= 5
 
 砍掉的慢环节 (v5 → v6):
   - GeckoTerminal K线 (每个代币 2s+)
@@ -37,7 +42,8 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退
+  币龄>=2h && 最高价<=0.00005 && 最高价到最低价跌幅<=40% && 当前价>=最低价*1.1
+  && 0.000015<=当前价<=0.000035 && 持币>=120 && 聪明钱>=3% && 仿盘>=5
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -252,10 +258,16 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退 ---
-QUALITY_MAX_AGE_HOURS = 1.0
-QUALITY_MIN_PROGRESS = 0.20
-QUALITY_MIN_HOLDERS = 5
+# --- 当前精筛策略: 回踩拉升 + 聪明钱 + 热点仿盘 ---
+QUALITY_MIN_AGE_HOURS = 2.0
+QUALITY_HIGHEST_PRICE_MAX = 0.00005
+QUALITY_HISTORY_MAX_DRAWDOWN = 0.40
+QUALITY_PULLBACK_REBOUND_RATIO = 1.10
+QUALITY_CURRENT_PRICE_MIN = 0.000015
+QUALITY_CURRENT_PRICE_MAX = 0.000035
+QUALITY_MIN_HOLDERS = 120
+QUALITY_MIN_SMART_MONEY_HOLD_PCT = 0.03
+QUALITY_MIN_COPYCAT_COUNT = 5
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -268,12 +280,10 @@ QUALITY_PRICE_SURGE_MIN_GAIN = 0.20
 # --- 旧硬筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MAX_HOLDERS = 50
 QUALITY_MAX_PRICE = 0.00002
-QUALITY_MIN_AGE_HOURS = 1.0
 QUALITY_MAX_COPYCAT_COUNT = 50
 QUALITY_MAX_PRICE_CHANGE_H1 = 100.0
 QUALITY_MIN_VOLUME_24H = 5000.0
 QUALITY_MIN_PRICE_RATIO = 0.80
-QUALITY_HISTORY_MAX_DRAWDOWN = 0.35
 QUALITY_PROGRESS_SURGE_ROUNDS = 3
 QUALITY_PRICE_SURGE_ROUNDS = 3
 QUALITY_VOLUME_SURGE_PREV_ROUNDS = 6
@@ -4060,6 +4070,23 @@ def _quality_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _quality_pct_fraction(value) -> float:
+    pct = _quality_float(value)
+    return pct / 100.0 if pct > 1 else pct
+
+
+def _apply_binance_dynamic_metrics(t: dict, dyn: dict | None) -> None:
+    if not dyn:
+        return
+    t["smartMoneyHolders"] = int(_quality_float(dyn.get("smartMoneyHolders")))
+    t["smartMoneyHoldPct"] = _quality_pct_fraction(dyn.get("smartMoneyHoldPct"))
+    t["kolHolders"] = int(_quality_float(dyn.get("kolHolders")))
+    t["kolHoldPct"] = _quality_pct_fraction(dyn.get("kolHoldPct"))
+    t["proHolders"] = int(_quality_float(dyn.get("proHolders")))
+    t["proHoldPct"] = _quality_pct_fraction(dyn.get("proHoldPct"))
+    t["devHoldPct"] = _quality_pct_fraction(dyn.get("devHoldPct"))
+
+
 def _history_with_current(t: dict, history_key: str, current_key: str) -> list[float]:
     hist = [_quality_float(v) for v in (t.get(history_key) or [])]
     current = _quality_float(t.get(current_key))
@@ -4078,46 +4105,85 @@ def _volume_deltas(t: dict) -> list[float]:
     return deltas
 
 
-def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str], dict]:
+def _check_quality_base_tags(
+    t: dict,
+    now_ms: int,
+    require_smart_money: bool = True,
+) -> tuple[bool, str, list[str], dict]:
     created_at = _quality_float(t.get("createdAt", t.get("created_at", 0)))
     age_hours = (
         (now_ms - created_at) / 3600000
         if created_at > 0
         else _quality_float(t.get("age_hours", t.get("_age_hours", -1)), -1)
     )
-    progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
-    progress_hist = [_quality_float(v) for v in (t.get("progressHistory") or [])]
     scan_count = int(_quality_float(t.get("scanCount"), 0))
+    price_hist = [_quality_float(v) for v in (t.get("priceHistory") or [])]
+    if current_price > 0 and (not price_hist or price_hist[-1] != current_price):
+        price_hist.append(current_price)
+    valid_prices = [p for p in price_hist if p > 0]
+    peak_price = _quality_float(t.get("peakPrice"))
+    if peak_price > 0:
+        valid_prices.append(peak_price)
+    highest_price = max(valid_prices) if valid_prices else 0
+    lowest_price = min(valid_prices) if valid_prices else 0
+    max_drawdown = (
+        (highest_price - lowest_price) / highest_price
+        if highest_price > 0 and lowest_price > 0
+        else 0
+    )
+    rebound_ratio = current_price / lowest_price if current_price > 0 and lowest_price > 0 else 0
+    smart_money_pct = _quality_pct_fraction(t.get("smartMoneyHoldPct"))
+    copycat_count = int(_quality_float((t.get("copycat") or {}).get("count")))
     base_tags = []
     metrics = {
         "age_hours": age_hours,
-        "progress": progress,
         "holders": holders,
         "price": current_price,
         "scan_count": scan_count,
+        "highest_price": highest_price,
+        "lowest_price": lowest_price,
+        "max_drawdown": max_drawdown,
+        "rebound_ratio": rebound_ratio,
+        "smart_money_pct": smart_money_pct,
+        "copycat_count": copycat_count,
     }
 
     if age_hours < 0:
         return False, "币龄未知", base_tags, metrics
-    if age_hours > QUALITY_MAX_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄≤{QUALITY_MAX_AGE_HOURS:g}h")
-    if progress < QUALITY_MIN_PROGRESS:
-        return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
-    base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
-    if scan_count > 1 and len(progress_hist) >= 2:
-        prev_progress = progress_hist[-2]
-        metrics["prev_progress"] = prev_progress
-        if progress < prev_progress:
-            return False, (
-                f"进度倒退 ({prev_progress*100:.1f}%→{progress*100:.1f}%)"
-            ), base_tags, metrics
-        base_tags.append("进度不倒退")
+    if age_hours < QUALITY_MIN_AGE_HOURS:
+        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:g}h", base_tags, metrics
+    base_tags.append(f"币龄≥{QUALITY_MIN_AGE_HOURS:g}h")
+    if highest_price <= 0:
+        return False, "最高价未知", base_tags, metrics
+    if highest_price > QUALITY_HIGHEST_PRICE_MAX:
+        return False, f"最高价{highest_price:.2e}>{QUALITY_HIGHEST_PRICE_MAX:.2e}", base_tags, metrics
+    base_tags.append(f"最高价≤{QUALITY_HIGHEST_PRICE_MAX:.2e}")
+    if len(valid_prices) < 2:
+        return False, "价格历史不足2个点", base_tags, metrics
+    if max_drawdown > QUALITY_HISTORY_MAX_DRAWDOWN:
+        return False, f"高低跌幅{max_drawdown*100:.1f}%>{QUALITY_HISTORY_MAX_DRAWDOWN*100:.0f}%", base_tags, metrics
+    base_tags.append(f"高低跌幅≤{QUALITY_HISTORY_MAX_DRAWDOWN*100:.0f}%")
+    if rebound_ratio < QUALITY_PULLBACK_REBOUND_RATIO:
+        return False, f"当前/最低{rebound_ratio:.2f}x<{QUALITY_PULLBACK_REBOUND_RATIO:.1f}x", base_tags, metrics
+    base_tags.append(f"当前≥最低*{QUALITY_PULLBACK_REBOUND_RATIO:.1f}")
+    if current_price < QUALITY_CURRENT_PRICE_MIN or current_price > QUALITY_CURRENT_PRICE_MAX:
+        return False, (
+            f"当前价{current_price:.2e}不在"
+            f"{QUALITY_CURRENT_PRICE_MIN:.2e}~{QUALITY_CURRENT_PRICE_MAX:.2e}"
+        ), base_tags, metrics
+    base_tags.append(f"当前价{QUALITY_CURRENT_PRICE_MIN:.2e}~{QUALITY_CURRENT_PRICE_MAX:.2e}")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
+    if require_smart_money:
+        if smart_money_pct < QUALITY_MIN_SMART_MONEY_HOLD_PCT:
+            return False, f"聪明钱{smart_money_pct*100:.1f}%<{QUALITY_MIN_SMART_MONEY_HOLD_PCT*100:.0f}%", base_tags, metrics
+        base_tags.append(f"聪明钱≥{QUALITY_MIN_SMART_MONEY_HOLD_PCT*100:.0f}%")
+    if copycat_count < QUALITY_MIN_COPYCAT_COUNT:
+        return False, f"仿盘{copycat_count}<{QUALITY_MIN_COPYCAT_COUNT}", base_tags, metrics
+    base_tags.append(f"仿盘≥{QUALITY_MIN_COPYCAT_COUNT}")
 
     return True, "", base_tags, metrics
 
@@ -4466,25 +4532,47 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      - 币龄 <= 1h
-      - 进度 >= 20%
-      - 持币 >= 5
-      - 非首轮扫描时，本轮进度 >= 上轮进度
+      - 币龄 >= 2h
+      - 最高价 <= 0.00005
+      - 最高价到最低价跌幅 <= 40%
+      - 当前价 >= 最低价 * 1.1
+      - 0.000015 <= 当前价 <= 0.000035
+      - 持币 >= 120
+      - 聪明钱 >= 3%
+      - 仿盘 >= 5
     """
     results = []
 
+    prelim = []
     for t in candidates:
+        local_ok, local_reason, _, _ = _check_quality_base_tags(
+            t, now_ms, require_smart_money=False
+        )
+        if local_ok:
+            prelim.append(t)
+        else:
+            addr = t.get("address", "")
+            name = t.get("name") or addr[:16]
+            log.info("基础标签: ✗ %s — %s", name, local_reason)
+
+    addrs = [t.get("address", "") for t in prelim if t.get("address")]
+    binance_dynamic = fetch_binance_token_dynamic(addrs)
+
+    for t in prelim:
         addr = t.get("address", "")
         name = t.get("name") or addr[:16]
+        _apply_binance_dynamic_metrics(t, binance_dynamic.get(addr.lower()))
         base_ok, base_reason, base_tags, base_metrics = _check_quality_base_tags(t, now_ms)
         if not base_ok:
             log.info("基础标签: ✗ %s — %s", name, base_reason)
             continue
 
         age_hours = base_metrics["age_hours"]
-        progress = base_metrics["progress"]
         holders = base_metrics["holders"]
         current_price = base_metrics["price"]
+        smart_money_pct = base_metrics["smart_money_pct"]
+        copycat_count = base_metrics["copycat_count"]
+        progress = _quality_float(t.get("progress"))
         is_graduated = progress >= 1.0
 
         t["_base_tags"] = base_tags
@@ -4497,16 +4585,17 @@ def tag_filter(candidates: list[dict], now_ms: int,
         results.append(t)
 
         log.info(
-            "精筛: ✓ %s — 币龄=%.2fh, 进度=%.1f%%, 持币=%d, 价格=%.2e, "
+            "精筛: ✓ %s — 币龄=%.2fh, 持币=%d, 聪明钱=%.1f%%, 仿盘=%d, 价格=%.2e, "
             "条件=[%s]",
-            name, age_hours, progress * 100, holders, current_price,
+            name, age_hours, holders, smart_money_pct * 100, copycat_count, current_price,
             ", ".join(base_tags)
         )
 
     results.sort(key=lambda x: (
-        -x.get("_quality_metrics", {}).get("progress", 0),
+        -x.get("_quality_metrics", {}).get("smart_money_pct", 0),
+        -x.get("_quality_metrics", {}).get("copycat_count", 0),
         -x.get("_quality_metrics", {}).get("holders", 0),
-        x.get("_quality_metrics", {}).get("age_hours", 999),
+        x.get("_quality_metrics", {}).get("max_drawdown", 999),
     ))
     return results, []
 
@@ -4539,6 +4628,7 @@ def post_quality_defense(candidates: list[dict], api_key: str,
         # 1. Top10 持仓集中度检查 (币安 Web3)
         dyn = binance_dynamic.get(addr.lower())
         if dyn:
+            _apply_binance_dynamic_metrics(t, dyn)
             raw_top10 = float(dyn.get("top10Pct") or 0)
             if raw_top10 > 0:
                 concentration = raw_top10 / 100 if raw_top10 > 1 else raw_top10
@@ -4650,6 +4740,9 @@ def format_message(results: list[dict]) -> str:
         top10 = item.get("top10Concentration")
         if top10 is not None:
             lines.append(f"🏦 Top10持仓: {top10 * 100:.0f}%")
+        smart_money_pct = item.get("smartMoneyHoldPct")
+        if smart_money_pct is not None:
+            lines.append(f"🧠 聪明钱: {smart_money_pct * 100:.1f}%")
         # 开发者行为
         dev = item.get("devBehavior")
         if dev:
@@ -5107,7 +5200,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退)
+    # 精筛 (币龄>=2h && 价格回踩拉升 && 持币>=120 && 聪明钱>=3% && 仿盘>=5)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     # 计算大盘情绪
@@ -5226,10 +5319,11 @@ def scan_once(cfg: dict) -> dict:
     # 精筛后防线: TOP10 持仓过度集中直接不通过精筛, 避免推送和自动买入。
     quality_results = post_quality_defense(quality_results, bscscan_key, cfg)
 
-    # 按进度、持币数排序
+    # 按聪明钱、仿盘热度、持币数排序
     quality_results.sort(
         key=lambda x: (
-            x.get("_quality_metrics", {}).get("progress", x.get("progress", 0)),
+            x.get("_quality_metrics", {}).get("smart_money_pct", 0),
+            x.get("_quality_metrics", {}).get("copycat_count", 0),
             x.get("holders", 0),
         ),
         reverse=True,
@@ -5340,7 +5434,7 @@ def scan_once(cfg: dict) -> dict:
         return
 
     # 推送精筛结果 (代币详情, 不管是否开自动交易都推)
-    # _bonus_score 仅作兼容字段；通过当前三条件精筛即可推送/买入
+    # _bonus_score 仅作兼容字段；通过当前精筛策略即可推送/买入
 
     # 过滤: 只推送通过当前精筛策略的代币，确保推送和买入条件一致
     bonus_filtered = quality_results_for_dingding
