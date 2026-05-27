@@ -7,12 +7,14 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退 && KOL/聪明钱持仓占比任一>=3%
+  4. 精筛 (瞬时): 币龄<=1h && 进度>=20% && 0.000005<=价格<=0.00002 && 1h涨幅<=500% && 持币>=5 && 非首轮进度不倒退 && KOL/聪明钱持仓占比任一>=3%
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   - 币龄 <= 1h
   - 进度 >= 20%
+  - 0.000005 <= 当前价 <= 0.00002
+  - 1h 涨幅 <= 500%
   - 持币 >= 5
   - 非首轮扫描时，本轮进度 >= 上轮进度
   - KOL/聪明钱持仓占比任一 >= 3%
@@ -39,7 +41,8 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退 && KOL/聪明钱持仓占比任一>=3%
+  币龄<=1h && 进度>=20% && 0.000005<=价格<=0.00002 && 1h涨幅<=500%
+  && 持币>=5 && 非首轮进度不倒退 && KOL/聪明钱持仓占比任一>=3%
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -260,6 +263,9 @@ QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_PROGRESS = 0.20
 QUALITY_MIN_HOLDERS = 5
 QUALITY_MIN_KEY_HOLD_PCT = 3.0
+QUALITY_CURRENT_PRICE_MIN = 0.000005
+QUALITY_CURRENT_PRICE_MAX = 0.00002
+QUALITY_PRICE_CHANGE_H1_MAX = 500.0
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -4143,6 +4149,7 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
     progress_hist = [_quality_float(v) for v in (t.get("progressHistory") or [])]
+    price_change_h1 = _quality_float(t.get("priceChangeH1"))
     scan_count = int(_quality_float(t.get("scanCount"), 0))
     key_hold_metrics = _quality_key_hold_metrics(t)
     base_tags = []
@@ -4151,6 +4158,7 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
         "progress": progress,
         "holders": holders,
         "price": current_price,
+        "price_change_h1": price_change_h1,
         "scan_count": scan_count,
         **key_hold_metrics,
     }
@@ -4171,6 +4179,15 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
                 f"进度倒退 ({prev_progress*100:.1f}%→{progress*100:.1f}%)"
             ), base_tags, metrics
         base_tags.append("进度不倒退")
+    if current_price < QUALITY_CURRENT_PRICE_MIN or current_price > QUALITY_CURRENT_PRICE_MAX:
+        return False, (
+            f"当前价{current_price:.2e}不在"
+            f"{QUALITY_CURRENT_PRICE_MIN:.2e}~{QUALITY_CURRENT_PRICE_MAX:.2e}"
+        ), base_tags, metrics
+    base_tags.append(f"当前价{QUALITY_CURRENT_PRICE_MIN:.2e}~{QUALITY_CURRENT_PRICE_MAX:.2e}")
+    if price_change_h1 > QUALITY_PRICE_CHANGE_H1_MAX:
+        return False, f"1h涨幅{price_change_h1:.1f}%>{QUALITY_PRICE_CHANGE_H1_MAX:.0f}%", base_tags, metrics
+    base_tags.append(f"1h涨幅≤{QUALITY_PRICE_CHANGE_H1_MAX:.0f}%")
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币数{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
@@ -4533,6 +4550,8 @@ def tag_filter(candidates: list[dict], now_ms: int,
     精筛开仓策略:
       - 币龄 <= 1h
       - 进度 >= 20%
+      - 0.000005 <= 当前价 <= 0.00002
+      - 1h 涨幅 <= 500%
       - 持币 >= 5
       - 非首轮扫描时，本轮进度 >= 上轮进度
       - KOL/聪明钱持仓占比任一 >= 3%
@@ -5191,8 +5210,8 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h && 进度>=20% && 持币>=5 && 非首轮进度不倒退
-    #       && KOL/聪明钱持仓占比任一>=3%)
+    # 精筛 (币龄<=1h && 进度>=20% && 0.000005<=价格<=0.00002 && 1h涨幅<=500%
+    #       && 持币>=5 && 非首轮进度不倒退 && KOL/聪明钱持仓占比任一>=3%)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     if survivors:
