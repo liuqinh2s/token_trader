@@ -3941,11 +3941,24 @@ def _sync_positions_from_wallet(bnb_price_usd: float):
     wallet_tokens = _scan_wallet_tokens(bnb_price_usd)
     wallet_addrs = {h["address"].lower() for h in wallet_tokens}
 
-    # 关闭链上已无余额的持仓
+    # 关闭链上已无余额的持仓。
+    # 注意: wallet_tokens 只包含本轮成功定价且价值 > $0.1 的余额。
+    # 价格源抖动或迁移时, 有余额的旧仓位可能不会出现在 wallet_tokens 中,
+    # 不能因此把 OPEN 仓位关掉, 否则后续 wallet_sync 会重置买入价/最高价/买入时间。
     closed = 0
     for pos in old_positions:
-        if pos["token_address"].lower() not in wallet_addrs:
-            log.info("同步: 关闭无余额持仓 %s (链上已无价值>$0.1的余额)",
+        has_balance = pos["token_address"].lower() in wallet_addrs
+        if not has_balance:
+            try:
+                token_cs = Web3.to_checksum_address(pos["token_address"])
+                token_contract = _w3.eth.contract(address=token_cs, abi=ERC20_ABI)
+                has_balance = token_contract.functions.balanceOf(_wallet_address).call() > 0
+            except Exception as e:
+                log.debug("同步: 查询旧持仓余额失败 %s: %s",
+                          pos["token_name"] or pos["token_address"][:16], e)
+
+        if not has_balance:
+            log.info("同步: 关闭无余额持仓 %s (链上余额为 0)",
                      pos["token_name"] or pos["token_address"][:16])
             close_position(conn, pos["id"], 0, "", "SYNC_NO_BALANCE", pos["buy_price_usd"])
             closed += 1
