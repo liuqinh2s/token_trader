@@ -32,9 +32,9 @@ BNB 余额管理 (v18 新增):
   - 防止 BNB 价格波动导致资产缩水
 
 止盈止损策略:
-  1. 最高涨幅 <= 30% 时: 从最高价下跌 15% 止盈
-  2. 最高涨幅 >= 30% 时: 盈利回撤一半止盈
-  3. 超期卖出: 买入超过 15 分钟仍不赚钱则卖出
+  1. 固定 1.4U 开仓
+  2. 持仓超过 7 天自动平仓
+  3. 每小时扫描持仓, 盈利达到 100 倍自动止盈
 
 旧版回撤/中点/10%分段止盈策略已备份为 check_sell_conditions_legacy_v18, 当前不参与卖出。
 
@@ -2119,48 +2119,18 @@ def calculate_buy_amount(cfg: dict, bnb_price_usd: float,
                          pay_currency: str = "BNB") -> float:
     """
     计算本次买入金额 (以 USDT 计价)
-    
-    规则: 按总仓位的 1% 开仓
-    总仓位 = BNB余额 + USDT余额 + 所有持仓价值
-    但不小于 min_buy_usd, 不大于 max_buy_usd
+
+    当前策略: 固定金额开仓, 默认 1.4U。
     
     返回: USDT 数量 (0 表示余额不足)
     """
     trading_cfg = cfg.get("trading", {})
-    min_usd = trading_cfg.get("min_buy_usd", 1)
-    max_usd = trading_cfg.get("max_buy_usd", 100)
-    fraction = trading_cfg.get("buy_fraction", 0.01)  # 默认 1%
+    buy_usdt = float(trading_cfg.get("fixed_buy_usd", 1.4))
 
-    # 计算总仓位: BNB + USDT + 持仓价值
     bnb_balance = get_bnb_balance()
     usdt_balance = get_usdt_balance()
     bnb_value = bnb_balance * bnb_price_usd
-    
-    # 计算持仓价值
-    position_value = 0.0
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        positions = get_open_positions(conn)
-        for pos in positions:
-            try:
-                decimals = pos.get("token_decimals", 18)
-                token_amount = int(pos.get("buy_amount", 0)) / (10 ** decimals)
-                pos_price = pos.get("current_price_usd", 0) or pos.get("buy_price_usd", 0)
-                position_value += token_amount * pos_price
-            except Exception:
-                pass
-        conn.close()
-    except Exception as e:
-        log.debug("计算持仓价值失败: %s", e)
-    
-    total_portfolio = bnb_value + usdt_balance + position_value
-    log.info("总仓位: BNB $%.2f + USDT $%.2f + 持仓 $%.2f = $%.2f",
-             bnb_value, usdt_balance, position_value, total_portfolio)
-    
-    # 按 fraction 计算买入金额
-    buy_usdt = total_portfolio * fraction
-    buy_usdt = max(min_usd, min(buy_usdt, max_usd))
-    
+
     # 检查实际可用余额
     if pay_currency == "USDT":
         available_usd = usdt_balance
@@ -2177,8 +2147,7 @@ def calculate_buy_amount(cfg: dict, bnb_price_usd: float,
             log.warning("余额不足: %s", balance_label)
             return 0.0
 
-    log.info("买入计算: %s → 买入 $%.2f (%.1f%% of $%.2f)",
-             balance_label, buy_usdt, fraction * 100, total_portfolio)
+    log.info("买入计算: %s → 固定买入 $%.2f", balance_label, buy_usdt)
     return buy_usdt
 
 
@@ -2993,9 +2962,8 @@ def check_sell_conditions(pos: dict, current_price: float,
                           momentum: dict | None = None) -> tuple[bool, str, bool, float]:
     """
     检查是否满足卖出条件:
-      - 买入后立即跟踪最高价, 最高涨幅 <=30% 时从最高价下跌15%止盈
-      - 最高涨幅 >=30%: 当前盈利回撤到最高盈利的一半止盈
-      - 持仓超过15分钟且当前不赚钱则卖出
+      - 持仓超过 7 天自动平仓
+      - 每轮持仓扫描中, 盈利达到 100 倍自动止盈
 
     返回: (是否应该卖出, 卖出原因, 是否是部分止盈, 要卖出的比例 (0-1))
     """
@@ -3009,39 +2977,27 @@ def check_sell_conditions(pos: dict, current_price: float,
     profit_pct = (current_price - buy_price) / buy_price * 100
     max_profit_pct = (max_price - buy_price) / buy_price * 100 if max_price > 0 else profit_pct
 
-    tp_midpoint_pct = trading_cfg.get("tp_midpoint_pct", 30)
-    tp_drawdown_pct = trading_cfg.get("tp_drawdown_pct", 15)
-    time_stop_minutes = trading_cfg.get("time_stop_minutes", 15)
-
     if max_price <= 0:
         max_price = buy_price
         max_profit_pct = 0
 
-    if max_profit_pct >= 0:
-        if max_profit_pct >= tp_midpoint_pct:
-            half_profit_pct = max_profit_pct / 2
-            half_profit_price = buy_price * (1 + half_profit_pct / 100)
-            if current_price <= half_profit_price:
-                return True, (
-                    f"HALF_PROFIT_TRAIL_TP (盈利回撤一半: 最高盈利 {max_profit_pct:.0f}%, "
-                    f"止盈线 {half_profit_pct:.0f}% (${half_profit_price:.12f}), "
-                    f"当前 {profit_pct:.0f}%)"
-                ), False, 1.0
-        else:
-            drawdown_price = max_price * (1 - tp_drawdown_pct / 100)
-            if current_price <= drawdown_price:
-                drawdown_profit_pct = (drawdown_price - buy_price) / buy_price * 100
-                return True, (
-                    f"TRAILING_TP_15 (回撤止盈: 最高盈利 {max_profit_pct:.0f}%, "
-                    f"从最高价下跌 {tp_drawdown_pct:.0f}% 至 ${drawdown_price:.12f} "
-                    f"({drawdown_profit_pct:.0f}%), 当前 {profit_pct:.0f}%)"
-                ), False, 1.0
-
     hold_ms = int(time.time() * 1000) - pos["buy_time"]
-    hold_minutes = hold_ms / (60 * 1000)
-    if hold_minutes >= time_stop_minutes and profit_pct <= 0:
-        return True, (f"TIME_STOP (买入 {hold_minutes:.0f}m, "
-                      f"当前不赚钱 {profit_pct:.0f}%)"), False, 1.0
+    hold_days = hold_ms / (24 * 3600 * 1000)
+    max_hold_days = float(trading_cfg.get("max_hold_days", 7))
+    take_profit_multiple = float(trading_cfg.get("take_profit_multiple", 100))
+    price_multiple = current_price / buy_price
+
+    if hold_days >= max_hold_days:
+        return True, (
+            f"TIME_EXIT_{max_hold_days:g}D (持仓 {hold_days:.1f}天, "
+            f"当前 {profit_pct:.0f}%, 最高 {max_profit_pct:.0f}%)"
+        ), False, 1.0
+
+    if price_multiple >= take_profit_multiple:
+        return True, (
+            f"TAKE_PROFIT_{take_profit_multiple:g}X "
+            f"(当前 {price_multiple:.1f}x, 盈利 {profit_pct:.0f}%)"
+        ), False, 1.0
 
     return False, "", False, 0.0
 
@@ -3423,7 +3379,7 @@ _monitor_stop = threading.Event()
 
 def monitor_positions(cfg_loader, bnb_price_func):
     """
-    持仓监控主循环, 每分钟检查所有持仓
+    持仓监控主循环, 默认每小时检查所有持仓
     cfg_loader: callable, 返回最新 config dict
     bnb_price_func: callable, 返回 BNB 的 USD 价格
     """
@@ -3444,14 +3400,15 @@ def monitor_positions(cfg_loader, bnb_price_func):
         try:
             cfg = cfg_loader()
             trading_cfg = cfg.get("trading", {})
+            monitor_interval_sec = trading_cfg.get("monitor_interval_sec", 3600)
             if not trading_cfg.get("enabled", False):
-                _monitor_stop.wait(60)
+                _monitor_stop.wait(monitor_interval_sec)
                 continue
 
             bnb_price = bnb_price_func()
             if bnb_price <= 0:
                 log.warning("监控: BNB 价格无效, 跳过本轮")
-                _monitor_stop.wait(60)
+                _monitor_stop.wait(monitor_interval_sec)
                 continue
 
             conn = sqlite3.connect(str(DB_PATH))
@@ -3460,7 +3417,7 @@ def monitor_positions(cfg_loader, bnb_price_func):
 
             if not positions:
                 conn.close()
-                _monitor_stop.wait(60)
+                _monitor_stop.wait(monitor_interval_sec)
                 continue
 
             log.info("监控: %d 个持仓", len(positions))
@@ -3512,12 +3469,18 @@ def monitor_positions(cfg_loader, bnb_price_func):
                     log.debug("监控: 无法获取 %s 价格", name)
                     continue
 
+                buy_price = pos["buy_price_usd"]
+                hold_ms = int(time.time() * 1000) - pos["buy_time"]
+                hold_hours = hold_ms / (3600 * 1000)
+                hold_days = hold_hours / 24
+                max_hold_days = float(trading_cfg.get("max_hold_days", 7))
+
                 # 计算持仓价值, 低于 $0.1 跳过监控
                 try:
                     decimals = pos.get("token_decimals", 18)
                     token_amount = int(pos.get("buy_amount", 0)) / (10 ** decimals)
                     position_value = token_amount * current_price
-                    if position_value < 0.1:
+                    if position_value < 0.1 and hold_days < max_hold_days:
                         log.debug("监控: 跳过 %s (价值 $%.4f < $0.1)", name, position_value)
                         continue
                 except Exception:
@@ -3527,16 +3490,11 @@ def monitor_positions(cfg_loader, bnb_price_func):
                 max_price = max(pos["max_price_usd"] or 0, current_price)
                 update_position_price(conn, pos["id"], current_price, max_price)
 
-                buy_price = pos["buy_price_usd"]
                 profit_pct = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
-                hold_ms = int(time.time() * 1000) - pos["buy_time"]
-                hold_hours = hold_ms / (3600 * 1000)
-                hold_days = hold_hours / 24
-                time_stop_minutes = trading_cfg.get("time_stop_minutes", 15)
                 max_profit_pct = ((max_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
                 expire_tag = ""
-                if hold_ms >= time_stop_minutes * 60 * 1000 and profit_pct <= 0:
-                    expire_tag = f" ⚠️{time_stop_minutes:.0f}m不赚钱"
+                if hold_days >= max_hold_days:
+                    expire_tag = f" ⚠️>{max_hold_days:g}天"
                 log.info("  %s [%s]: 当前 $%.12f | 买入 $%.12f | 最高 $%.12f | 盈亏 %+.1f%% | 持仓 %.1f天(%.0fh)%s",
                          name, venue, current_price, buy_price, max_price, profit_pct,
                          hold_days, hold_hours, expire_tag)
@@ -3677,7 +3635,7 @@ def monitor_positions(cfg_loader, bnb_price_func):
             if _send_error:
                 _send_error(f"持仓监控异常: {e}", exc_info=True)
 
-        _monitor_stop.wait(trading_cfg.get("monitor_interval_sec", 30) if 'trading_cfg' in dir() else 30)
+        _monitor_stop.wait(monitor_interval_sec if 'monitor_interval_sec' in dir() else 3600)
 
     log.info("持仓监控线程停止")
 
