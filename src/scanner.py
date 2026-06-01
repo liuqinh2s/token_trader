@@ -7,14 +7,14 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002 && KOL/聪明钱持仓占比任一>=3% && Top10持仓<=20%
+  4. 精筛 (瞬时): 币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002 && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   - 币龄 <= 1h
   - 当前价 <= 0.00001
   - 最高价 <= 0.00002
-  - KOL/聪明钱持仓占比任一 >= 3%
+  - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
   - Top10 持仓占比 <= 20%
 
 砍掉的慢环节 (v5 → v6):
@@ -40,7 +40,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 
 精筛条件:
   币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
-  && KOL/聪明钱持仓占比任一>=3% && Top10持仓<=20%
+  && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -256,9 +256,10 @@ SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
 # --- 当前精筛策略: 币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
-#                     && (KOL/聪明钱持仓占比任一>=3%) && Top10<=20% ---
+#                     && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20% ---
 QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_KEY_HOLD_PCT = 3.0
+QUALITY_CROSS_KEY_HOLD_PCT = 1.0
 QUALITY_CURRENT_PRICE_MAX = 0.00001
 QUALITY_PEAK_PRICE_MAX = 0.00002
 
@@ -4112,7 +4113,16 @@ def _quality_key_hold_metrics(t: dict) -> dict:
         "kol_hold_pct": kol_pct,
         "smart_money_hold_pct": smart_pct,
         "key_hold_max_pct": max(kol_pct, smart_pct),
+        "key_hold_cross_pct": min(kol_pct, smart_pct),
     }
+
+
+def _quality_key_hold_pass(metrics: dict) -> bool:
+    return (
+        metrics["key_hold_max_pct"] >= QUALITY_MIN_KEY_HOLD_PCT
+        and metrics["kol_hold_pct"] >= QUALITY_CROSS_KEY_HOLD_PCT
+        and metrics["smart_money_hold_pct"] >= QUALITY_CROSS_KEY_HOLD_PCT
+    )
 
 
 def _history_with_current(t: dict, history_key: str, current_key: str) -> list[float]:
@@ -4177,15 +4187,17 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
         ), base_tags, metrics
     base_tags.append(f"最高价≤{QUALITY_PEAK_PRICE_MAX:.2e}")
 
-    if key_hold_metrics["key_hold_max_pct"] < QUALITY_MIN_KEY_HOLD_PCT:
+    if not _quality_key_hold_pass(key_hold_metrics):
         return False, (
-            f"KOL/聪明钱持仓占比最高"
-            f"{key_hold_metrics['key_hold_max_pct']:.2f}%<{QUALITY_MIN_KEY_HOLD_PCT:g}% "
+            f"关键持仓不足: 需KOL/聪明钱任一≥{QUALITY_MIN_KEY_HOLD_PCT:g}%"
+            f"且两者均≥{QUALITY_CROSS_KEY_HOLD_PCT:g}% "
             f"(开发者{key_hold_metrics['dev_hold_pct']:.2f}%, "
             f"KOL{key_hold_metrics['kol_hold_pct']:.2f}%, "
             f"聪明钱{key_hold_metrics['smart_money_hold_pct']:.2f}%)"
         ), base_tags, metrics
-    base_tags.append(f"KOL/聪明钱持仓≥{QUALITY_MIN_KEY_HOLD_PCT:g}%")
+    base_tags.append(
+        f"关键持仓: 任一≥{QUALITY_MIN_KEY_HOLD_PCT:g}%且双边≥{QUALITY_CROSS_KEY_HOLD_PCT:g}%"
+    )
 
     return True, "", base_tags, metrics
 
@@ -4537,7 +4549,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
       - 币龄 <= 1h
       - 当前价 <= 0.00001
       - 最高价 <= 0.00002
-      - KOL/聪明钱持仓占比任一 >= 3%
+      - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
     """
     results = []
 
@@ -4583,7 +4595,7 @@ def post_quality_defense(candidates: list[dict], api_key: str,
                          cfg: dict | None = None) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
-    1. 关键持仓占比: KOL/聪明钱任一 >= 3%
+    1. 关键持仓占比: KOL/聪明钱任一 >= 3%, 且两者均 >= 1%
     2. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 20% 排除 (庄家控盘)
     3. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
     4. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
@@ -4610,15 +4622,17 @@ def post_quality_defense(candidates: list[dict], api_key: str,
         if dyn:
             apply_binance_dynamic_data([t], {addr.lower(): dyn}, update_previous=False)
             key_hold = _quality_key_hold_metrics(t)
-            if key_hold["key_hold_max_pct"] < QUALITY_MIN_KEY_HOLD_PCT:
+            if not _quality_key_hold_pass(key_hold):
                 exclude_reason = (
-                    "KOL/聪明钱持仓占比不足 "
-                    "开发者{:.2f}%/KOL{:.2f}%/聪明钱{:.2f}% (<{:.0f}%)"
+                    "关键持仓不足 "
+                    "开发者{:.2f}%/KOL{:.2f}%/聪明钱{:.2f}% "
+                    "(需任一≥{:.0f}%且两者均≥{:.0f}%)"
                 ).format(
                     key_hold["dev_hold_pct"],
                     key_hold["kol_hold_pct"],
                     key_hold["smart_money_hold_pct"],
                     QUALITY_MIN_KEY_HOLD_PCT,
+                    QUALITY_CROSS_KEY_HOLD_PCT,
                 )
 
             raw_top10 = float(dyn.get("top10Pct") or 0)
@@ -5194,7 +5208,7 @@ def scan_once(cfg: dict) -> dict:
             t["copycat"] = cc
 
     # 精筛 (币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
-    #       && KOL/聪明钱持仓占比任一>=3% && Top10<=20%)
+    #       && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20%)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     if survivors:
