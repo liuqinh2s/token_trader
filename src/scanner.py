@@ -7,13 +7,13 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002 && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
+  4. 精筛 (瞬时): 币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001 && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
   - 币龄 <= 1h
-  - 当前价 <= 0.00001
-  - 最高价 <= 0.00002
+  - 当前价 <= 0.000004
+  - 最高价 <= 0.00001
   - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
   - Top10 持仓占比 <= 20%
 
@@ -39,7 +39,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 社交媒体仅供前端展示, 不作为淘汰条件
 
 精筛条件:
-  币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
+  币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
   && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
 
 交易策略 (trader.py):
@@ -255,13 +255,13 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
+# --- 当前精筛策略: 币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
 #                     && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20% ---
 QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_KEY_HOLD_PCT = 3.0
 QUALITY_CROSS_KEY_HOLD_PCT = 1.0
-QUALITY_CURRENT_PRICE_MAX = 0.00001
-QUALITY_PEAK_PRICE_MAX = 0.00002
+QUALITY_CURRENT_PRICE_MAX = 0.000004
+QUALITY_PEAK_PRICE_MAX = 0.00001
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -4547,8 +4547,8 @@ def tag_filter(candidates: list[dict], now_ms: int,
     """
     精筛开仓策略:
       - 币龄 <= 1h
-      - 当前价 <= 0.00001
-      - 最高价 <= 0.00002
+      - 当前价 <= 0.000004
+      - 最高价 <= 0.00001
       - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
     """
     results = []
@@ -5207,7 +5207,7 @@ def scan_once(cfg: dict) -> dict:
         if cc:
             t["copycat"] = cc
 
-    # 精筛 (币龄<=1h && 当前价<=0.00001 && 最高价<=0.00002
+    # 精筛 (币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
     #       && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20%)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
