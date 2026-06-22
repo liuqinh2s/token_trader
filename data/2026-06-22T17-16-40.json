@@ -1,0 +1,19 @@
+{
+  "scanTime": "2026-06-22 17:16:40",
+  "tokens": [],
+  "queue": [],
+  "eliminatedThisRound": [],
+  "rejectedAtEntry": [],
+  "lastBlock": 105691915,
+  "lastScanTime": 1782119799578,
+  "scanRound": 3969,
+  "marketSentiment": 0,
+  "totalTokens": 0,
+  "filteredTokens": 0,
+  "newDiscovered": 0,
+  "newAdmitted": 0,
+  "eliminatedCount": 0,
+  "eliminatedTotal48h": 5,
+  "queueSize": 0,
+  "breakthroughTokens": []
+}
