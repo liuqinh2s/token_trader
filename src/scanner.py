@@ -5,16 +5,15 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 
 当前架构: 队列淘汰 + 条件精筛
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
-  2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min (社交仅供展示, 不作为淘汰条件)
+  2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001 && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
+  4. 精筛 (瞬时): 观察12~48h、进度>=50%、持币>=50、低价且稳定缓涨
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  - 币龄 <= 1h
-  - 当前价 <= 0.000004
-  - 最高价 <= 0.00001
-  - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
+  - 币龄 12~48h、进度 >= 50%、持币地址 >= 50
+  - 当前价 <= 0.00004、最高价 <= 0.0001、距峰值回撤 <= 50%
+  - 最近12h无单轮20%以上剧烈波动，整体缓涨且涨幅不超过200%
   - Top10 持仓占比 <= 20%
 
 砍掉的慢环节 (v5 → v6):
@@ -25,22 +24,24 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   - BSCScan 持币数查询 (免费 key 不支持 BSC 链)
   - RPC Transfer 日志持币数 (bonding curve 阶段不产生标准 Transfer, 不准确)
 
-淘汰条件 (永久剔除, v18 移除持币数依赖):
+淘汰条件 (永久剔除):
   - 诈骗代币黑名单 (已确认的诈骗代币合约地址, 入场即拒, 币龄>48h自动清理)
   - 诈骗开发者黑名单 (已确认的连续发诈骗币的开发者钱包地址, 其所有代币入场即拒)
   - 蹭名币 (symbol/name 命中主流币种黑名单, 如 USDT/BTC/ETH 等)
-  - 价格从峰值跌 95%+ (保护: 当前价格<1e-7 视为 API 异常, 跳过)
+  - 价格从峰值回撤 70%+ (保护: 当前价格<1e-7 视为 API 异常, 跳过)
   - 流动性跌破 $100 (仅已毕业代币)
-  - 进度阶梯淘汰: 币龄>1h进度<1%, >2h<5%, >4h<10%, >8h<15%
+  - 持币阶梯淘汰: 1/2/4/8/12/24/36h 至少 5/10/20/35/50/75/100 地址
+  - 进度阶梯淘汰: 1/2/4/8/12/24/36h 至少 3%/8%/15%/30%/50%/65%/80%
   - 进度从峰值跌 50 个百分点 (加减法, 无币龄要求)
   - 币龄 > 48h
   - 单根K线跌幅 > 55% (过山车币)
 
-注: 社交媒体仅供前端展示, 不作为淘汰条件
+注: 队列存活要求至少存在一个社交链接；入场筛阶段仍允许先进入队列等待补全数据
 
 精筛条件:
-  币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
-  && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10持仓<=20%
+  币龄12~48h && 进度>=50% && 持币>=50 && 当前价<=0.00004
+  && 最高价<=0.0001 && 峰值回撤<=50% && 最近12h稳定缓涨
+  && Top10持仓<=20%
 
 交易策略 (trader.py):
   止盈止损策略:
@@ -255,13 +256,17 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
-#                     && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20% ---
-QUALITY_MAX_AGE_HOURS = 1.0
-QUALITY_MIN_KEY_HOLD_PCT = 3.0
-QUALITY_CROSS_KEY_HOLD_PCT = 1.0
-QUALITY_CURRENT_PRICE_MAX = 0.000004
-QUALITY_PEAK_PRICE_MAX = 0.00001
+# --- 当前精筛策略: 观察满12h后，从48h队列中挑选稳定缓涨的低价币 ---
+QUALITY_MIN_AGE_HOURS = 12.0
+QUALITY_MAX_AGE_HOURS = 48.0
+QUALITY_MIN_PROGRESS = 0.50
+QUALITY_MIN_HOLDERS = 50
+QUALITY_CURRENT_PRICE_MAX = 0.00004
+QUALITY_PEAK_PRICE_MAX = 0.0001
+QUALITY_MAX_DRAWDOWN_FROM_PEAK = 0.50
+QUALITY_STABILITY_WINDOW_HOURS = 12
+QUALITY_STABILITY_MAX_STEP_CHANGE = 0.20
+QUALITY_STABILITY_MAX_TOTAL_GAIN = 2.00
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -274,7 +279,7 @@ QUALITY_PRICE_SURGE_MIN_GAIN = 0.20
 # --- 旧硬筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MAX_HOLDERS = 50
 QUALITY_MAX_PRICE = 0.00002
-QUALITY_MIN_AGE_HOURS = 1.0
+LEGACY_QUALITY_MIN_AGE_HOURS = 1.0
 QUALITY_MAX_COPYCAT_COUNT = 50
 QUALITY_MAX_PRICE_CHANGE_H1 = 100.0
 QUALITY_MIN_VOLUME_24H = 5000.0
@@ -553,18 +558,30 @@ FAKE_NAME_BLACKLIST = {
 # 精筛后防线阈值 — 使用 TOP10_CONCENTRATION_MAX (在上方加分标签区定义)
 
 # 淘汰阈值 (v18 移除大部分持币数依赖)
-ELIM_PRICE_DROP_PCT = 0.95             # 价格从峰值跌 95% (给暴涨币更多回调空间)
+ELIM_PRICE_DROP_PCT = 0.70             # 队列层放宽到峰值回撤70%; 精筛要求不超过50%
 ELIM_LIQ_FLOOR = 100                   # 流动性跌破 $100 (仅已毕业)
 ELIM_LIQ_PEAK_MIN = 2000               # 流动性曾达到 $2k 才触发流动性枯竭淘汰 (避免误杀小币)
 ELIM_PROGRESS_DROP_ABS = 0.50          # 进度从峰值跌 50 个百分点淘汰 (放宽, 进度本身会波动)
-ELIM_LOW_HOLDERS_AGE_HOURS = 4         # 币龄 >= 4h 且持币数过低 → 垃圾币淘汰
-ELIM_LOW_HOLDERS_MIN = 5               # 持币数 < 5 淘汰
-# 进度阶梯淘汰 (币龄越长, 容忍度越高)
+ELIM_LOW_HOLDERS_AGE_HOURS = 1
+ELIM_LOW_HOLDERS_MIN = 5
+# 队列分阶段收紧；12h 时必须具备进入精筛的基本进度和持币规模。
+ELIM_HOLDER_TIERS = [
+    (1.0, 5),
+    (2.0, 10),
+    (4.0, 20),
+    (8.0, 35),
+    (12.0, 50),
+    (24.0, 75),
+    (36.0, 100),
+]
 ELIM_PROGRESS_TIERS = [
-    (1.0, 0.01),    # 币龄 > 1h, 进度 < 1%
-    (2.0, 0.05),    # 币龄 > 2h, 进度 < 5%
-    (4.0, 0.10),    # 币龄 > 4h, 进度 < 10%
-    (8.0, 0.15),    # 币龄 > 8h, 进度 < 15%
+    (1.0, 0.03),
+    (2.0, 0.08),
+    (4.0, 0.15),
+    (8.0, 0.30),
+    (12.0, 0.50),
+    (24.0, 0.65),
+    (36.0, 0.80),
 ]
 ELIM_PRICE_DROP_MIN_PRICE = 1e-7      # 价格暴跌保护: 当前价格低于此值视为 API 异常, 跳过价格跌幅淘汰
 ELIM_KLINESINGLE_DROP_PCT = 0.55     # 单根15min K线跌幅 >55% → 过山车币淘汰 (放宽, 暴涨回调一根大阴线很常见)
@@ -3208,7 +3225,7 @@ def admission_filter(new_tokens: list[dict], existing_addrs: set[str]) -> tuple[
                     social_links["telegram"] = flap_meta["telegram"]
                 if flap_meta.get("website"):
                     social_links["website"] = flap_meta["website"]
-                # 社交仅供展示, 不作为淘汰条件
+                # 入场阶段不因社交缺失拒绝；随后由队列存活检查统一淘汰
                 social_count = len(social_links)
                 social_desc = flap_meta.get("description", "")
             else:
@@ -3253,7 +3270,7 @@ def admission_filter(new_tokens: list[dict], existing_addrs: set[str]) -> tuple[
                 rejected.append({"token": t, "detail": detail, "reason": f"币龄过大 ({age_desc})"})
                 continue
 
-            # 入场条件: 总供应量 = 10亿 (社交仅供展示, 不作为淘汰条件)
+            # 入场条件: 总供应量 = 10亿；社交条件由队列存活检查处理
             if detail["totalSupply"] != TOTAL_SUPPLY:
                 rejected.append({"token": t, "detail": detail, "reason": f"总量≠10亿 ({detail['totalSupply']})"})
                 continue
@@ -3317,9 +3334,15 @@ def elimination_check(queue: list[dict], now_ms: int,
 
         if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
             holders = t.get("holders", 0)
-            if holders < ELIM_LOW_HOLDERS_MIN:
+            min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
+            if holders < min_holders:
                 elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{holders}"
-                               f"<{ELIM_LOW_HOLDERS_MIN}")
+                               f"<{min_holders}")
+
+        peak_price = t.get("peakPrice", 0)
+        if not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
+            elim_reason = (f"最高价{peak_price:.2e}>精筛上限"
+                           f"{QUALITY_PEAK_PRICE_MAX:.2e}")
 
         if elim_reason:
             eliminated.append({**t, "eliminatedAt": now_ms, "elimReason": elim_reason})
@@ -3574,7 +3597,7 @@ def elimination_check(queue: list[dict], now_ms: int,
         # --- 淘汰条件 ---
         elim_reason = None
 
-        # 1. 价格从峰值跌 95%+ (增加异常值保护: 价格<1e-7 视为 API 垃圾数据, 跳过)
+        # 1. 价格从峰值回撤过大 (价格<1e-7 视为 API 异常, 跳过)
         peak = t.get("peakPrice", 0)
         if (peak > 0 and current_price > 0
                 and current_price >= ELIM_PRICE_DROP_MIN_PRICE
@@ -3593,13 +3616,18 @@ def elimination_check(queue: list[dict], now_ms: int,
             if current_liq < ELIM_LIQ_FLOOR:
                 elim_reason = f"流动性跌破 $100 (${current_liq:.0f})"
 
-        # 3. 低持币数垃圾币淘汰
-        if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
-            if current_holders < ELIM_LOW_HOLDERS_MIN:
-                elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{current_holders}"
-                               f"<{ELIM_LOW_HOLDERS_MIN}")
+        # 至少有一个可验证的社交链接（Twitter / Telegram / 官网等）
+        if not elim_reason and (t.get("socialCount", 0) or 0) < 1:
+            elim_reason = "缺少社交媒体链接"
 
-        # 4. 进度阶梯淘汰 (币龄越长, 容忍度越高)
+        # 3. 持币数按币龄逐级淘汰
+        if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
+            min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
+            if current_holders < min_holders:
+                elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{current_holders}"
+                               f"<{min_holders}")
+
+        # 4. 进度阶梯淘汰
         if not elim_reason:
             for age_h, min_prog in ELIM_PROGRESS_TIERS:
                 if age_hours > age_h and current_progress < min_prog:
@@ -4135,14 +4163,6 @@ def _quality_key_hold_metrics(t: dict) -> dict:
     }
 
 
-def _quality_key_hold_pass(metrics: dict) -> bool:
-    return (
-        metrics["key_hold_max_pct"] >= QUALITY_MIN_KEY_HOLD_PCT
-        and metrics["kol_hold_pct"] >= QUALITY_CROSS_KEY_HOLD_PCT
-        and metrics["smart_money_hold_pct"] >= QUALITY_CROSS_KEY_HOLD_PCT
-    )
-
-
 def _history_with_current(t: dict, history_key: str, current_key: str) -> list[float]:
     hist = [_quality_float(v) for v in (t.get(history_key) or [])]
     current = _quality_float(t.get(current_key))
@@ -4183,9 +4203,20 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
 
     if age_hours < 0:
         return False, "币龄未知", base_tags, metrics
+    if age_hours < QUALITY_MIN_AGE_HOURS:
+        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:g}h，观察不足", base_tags, metrics
     if age_hours > QUALITY_MAX_AGE_HOURS:
         return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄≤{QUALITY_MAX_AGE_HOURS:g}h")
+    base_tags.append(f"币龄{QUALITY_MIN_AGE_HOURS:g}–{QUALITY_MAX_AGE_HOURS:g}h")
+
+    if progress < QUALITY_MIN_PROGRESS:
+        return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
+    base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
+
+    if holders < QUALITY_MIN_HOLDERS:
+        return False, f"持币地址{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
+    base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
+
     if current_price <= 0 or current_price > QUALITY_CURRENT_PRICE_MAX:
         return False, (
             f"当前价{current_price:.2e}>{QUALITY_CURRENT_PRICE_MAX:.2e}"
@@ -4205,17 +4236,41 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
         ), base_tags, metrics
     base_tags.append(f"最高价≤{QUALITY_PEAK_PRICE_MAX:.2e}")
 
-    if not _quality_key_hold_pass(key_hold_metrics):
+    drawdown = 1 - current_price / peak_price if peak_price > 0 else 0
+    metrics["drawdown_from_peak"] = drawdown
+    if drawdown > QUALITY_MAX_DRAWDOWN_FROM_PEAK:
         return False, (
-            f"关键持仓不足: 需KOL/聪明钱任一≥{QUALITY_MIN_KEY_HOLD_PCT:g}%"
-            f"且两者均≥{QUALITY_CROSS_KEY_HOLD_PCT:g}% "
-            f"(开发者{key_hold_metrics['dev_hold_pct']:.2f}%, "
-            f"KOL{key_hold_metrics['kol_hold_pct']:.2f}%, "
-            f"聪明钱{key_hold_metrics['smart_money_hold_pct']:.2f}%)"
+            f"距最高价回撤{drawdown*100:.1f}%>"
+            f"{QUALITY_MAX_DRAWDOWN_FROM_PEAK*100:.0f}%"
         ), base_tags, metrics
-    base_tags.append(
-        f"关键持仓: 任一≥{QUALITY_MIN_KEY_HOLD_PCT:g}%且双边≥{QUALITY_CROSS_KEY_HOLD_PCT:g}%"
-    )
+    base_tags.append(f"峰值回撤≤{QUALITY_MAX_DRAWDOWN_FROM_PEAK*100:.0f}%")
+
+    price_hist = _history_with_current(t, "priceHistory", "price")
+    stability_rounds = int(QUALITY_STABILITY_WINDOW_HOURS * 60 / SCAN_INTERVAL_MIN)
+    recent_prices = [p for p in price_hist[-stability_rounds:] if p > 0]
+    if len(recent_prices) < stability_rounds:
+        return False, (
+            f"稳定性观察不足{len(recent_prices)}/{stability_rounds}轮"
+        ), base_tags, metrics
+
+    step_changes = [cur / prev - 1 for prev, cur in zip(recent_prices, recent_prices[1:])]
+    max_step_change = max(abs(change) for change in step_changes)
+    total_gain = recent_prices[-1] / recent_prices[0] - 1
+    metrics["stability_max_step_change"] = max_step_change
+    metrics["stability_total_gain"] = total_gain
+    if max_step_change > QUALITY_STABILITY_MAX_STEP_CHANGE:
+        return False, (
+            f"单轮价格波动{max_step_change*100:.1f}%>"
+            f"{QUALITY_STABILITY_MAX_STEP_CHANGE*100:.0f}%"
+        ), base_tags, metrics
+    if total_gain < 0:
+        return False, f"近{QUALITY_STABILITY_WINDOW_HOURS}h价格走低{total_gain*100:.1f}%", base_tags, metrics
+    if total_gain > QUALITY_STABILITY_MAX_TOTAL_GAIN:
+        return False, (
+            f"近{QUALITY_STABILITY_WINDOW_HOURS}h涨幅{total_gain*100:.1f}%>"
+            f"{QUALITY_STABILITY_MAX_TOTAL_GAIN*100:.0f}%，上涨过快"
+        ), base_tags, metrics
+    base_tags.append(f"近{QUALITY_STABILITY_WINDOW_HOURS}h稳定缓涨")
 
     return True, "", base_tags, metrics
 
@@ -4564,10 +4619,9 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      - 币龄 <= 1h
-      - 当前价 <= 0.000004
-      - 最高价 <= 0.00001
-      - KOL/聪明钱任一持仓占比 >= 3%, 且 KOL 和聪明钱持仓占比均 >= 1%
+      - 币龄 12~48h、进度 >= 50%、持币地址 >= 50
+      - 当前价 <= 0.00004、最高价 <= 0.0001、峰值回撤 <= 50%
+      - 最近 12h 单轮波动 <= 20%，整体稳定缓涨
     """
     results = []
 
@@ -4613,10 +4667,9 @@ def post_quality_defense(candidates: list[dict], api_key: str,
                          cfg: dict | None = None) -> list[dict]:
     """
     精筛后防线: 对精筛通过的少量代币做深度检查 (仅个位数, 不影响速度)
-    1. 关键持仓占比: KOL/聪明钱任一 >= 3%, 且两者均 >= 1%
-    2. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 20% 排除 (庄家控盘)
-    3. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
-    4. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
+    1. Top10 持仓集中度: 币安 Web3 Token Dynamic → 占比 > 20% 排除 (庄家控盘)
+    2. 开发者行为: BSCScan Transfer → 清仓/撤池子 排除 (跑路信号)
+    3. 假K线检测: GeckoTerminal 15min+1min K线 → 无影线≥80%/全阳线≥90%/脉冲死线 排除 (控盘刷量)
     """
     if not candidates:
         return candidates
@@ -4635,24 +4688,10 @@ def post_quality_defense(candidates: list[dict], api_key: str,
         creator = t.get("creator", "")
         exclude_reason = None
 
-        # 1. 关键持仓占比 + Top10 持仓集中度检查 (币安 Web3)
+        # 1. Top10 持仓集中度检查 (币安 Web3)
         dyn = binance_dynamic.get(addr.lower())
         if dyn:
             apply_binance_dynamic_data([t], {addr.lower(): dyn}, update_previous=False)
-            key_hold = _quality_key_hold_metrics(t)
-            if not _quality_key_hold_pass(key_hold):
-                exclude_reason = (
-                    "关键持仓不足 "
-                    "开发者{:.2f}%/KOL{:.2f}%/聪明钱{:.2f}% "
-                    "(需任一≥{:.0f}%且两者均≥{:.0f}%)"
-                ).format(
-                    key_hold["dev_hold_pct"],
-                    key_hold["kol_hold_pct"],
-                    key_hold["smart_money_hold_pct"],
-                    QUALITY_MIN_KEY_HOLD_PCT,
-                    QUALITY_CROSS_KEY_HOLD_PCT,
-                )
-
             raw_top10 = float(dyn.get("top10Pct") or 0)
             if raw_top10 > 0:
                 concentration = raw_top10 / 100 if raw_top10 > 1 else raw_top10
@@ -5226,7 +5265,7 @@ def scan_once(cfg: dict) -> dict:
             t["copycat"] = cc
 
     # 精筛 (币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
-    #       && KOL/聪明钱任一>=3% && KOL和聪明钱均>=1% && Top10<=20%)
+    #       && Top10<=20%)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
     if survivors:
@@ -5287,7 +5326,7 @@ def scan_once(cfg: dict) -> dict:
         # 币龄淘汰
         if age_hours > MAX_AGE_HOURS:
             elim_reason = f"币龄>{MAX_AGE_HOURS}h"
-        # 价格跌 90%
+        # 队列价格回撤上限
         if not elim_reason and peak_price > 0 and current_price > 0:
             if current_price < peak_price * (1 - ELIM_PRICE_DROP_PCT):
                 elim_reason = (f"价格跌{(1 - current_price / peak_price) * 100:.0f}% "
@@ -5302,11 +5341,17 @@ def scan_once(cfg: dict) -> dict:
             if (t.get("peakLiquidity", 0) >= ELIM_LIQ_PEAK_MIN
                     and current_liq < ELIM_LIQ_FLOOR):
                 elim_reason = f"流动性 ${t.get('peakLiquidity', 0):.0f}→${current_liq:.0f}"
-        # 低持币数垃圾币淘汰
+        if not elim_reason and (t.get("socialCount", 0) or 0) < 1:
+            elim_reason = "缺少社交媒体链接"
+        if not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
+            elim_reason = (f"最高价{peak_price:.2e}>精筛上限"
+                           f"{QUALITY_PEAK_PRICE_MAX:.2e}")
+        # 持币数按币龄逐级淘汰
         if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
-            if current_holders < ELIM_LOW_HOLDERS_MIN:
+            min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
+            if current_holders < min_holders:
                 elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{current_holders}"
-                               f"<{ELIM_LOW_HOLDERS_MIN}")
+                               f"<{min_holders}")
         # 进度阶梯淘汰
         if not elim_reason:
             for age_h, min_prog in ELIM_PROGRESS_TIERS:
