@@ -2304,7 +2304,7 @@ def fetch_binance_token_dynamic(addresses: list[str]) -> dict[str, dict]:
 
 def apply_binance_dynamic_data(tokens: list[dict], dynamic: dict[str, dict],
                                update_previous: bool = True) -> int:
-    """Write Binance dynamic wallet/concentration fields back to token dicts."""
+    """Write Binance dynamic holder and concentration fields back to token dicts."""
     updated = 0
     for t in tokens:
         addr = (t.get("address") or "").lower()
@@ -2319,6 +2319,30 @@ def apply_binance_dynamic_data(tokens: list[dict], dynamic: dict[str, dict],
         raw_top10 = _quality_float(dyn.get("top10Pct"))
         if raw_top10 > 0:
             t["top10Concentration"] = round(raw_top10 / 100 if raw_top10 > 1 else raw_top10, 4)
+
+        # Flap 没有 detail API，入队持币数初始为 0。Binance dynamic 是其主要
+        # 持币数来源；只在返回正数时覆盖，接口失败或暂未索引时保留缓存值。
+        dynamic_holders = int(_quality_float(dyn.get("holders")))
+        if dynamic_holders > 0:
+            old_holders = int(_quality_float(t.get("holders")))
+            t["holders"] = dynamic_holders
+            if not t.get("addedHolders"):
+                t["addedHolders"] = dynamic_holders
+            t["peakHolders"] = max(
+                int(_quality_float(t.get("peakHolders"))),
+                dynamic_holders,
+            )
+            holder_history = t.get("holdersHistory") or []
+            if holder_history:
+                holder_history[-1] = dynamic_holders
+            else:
+                holder_history = [dynamic_holders]
+            t["holdersHistory"] = holder_history[-5:]
+            if old_holders != dynamic_holders:
+                log.info(
+                    "  币安持币数更新 %s: %d→%d",
+                    t.get("name") or addr[:16], old_holders, dynamic_holders,
+                )
 
         t["devHoldPct"] = _quality_pct(dyn.get("devHoldPct"))
         t["smartMoneyHolders"] = int(_quality_float(dyn.get("smartMoneyHolders")))
@@ -3332,8 +3356,11 @@ def elimination_check(queue: list[dict], now_ms: int,
         if t_symbol in FAKE_NAME_BLACKLIST or t_name in FAKE_NAME_BLACKLIST:
             elim_reason = f"蹭名币 ({t.get('symbol', '')})"
 
+        holders = int(_quality_float(t.get("holders")))
+        if not elim_reason and holders <= 0:
+            elim_reason = "持币数查询失败或为0"
+
         if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
-            holders = t.get("holders", 0)
             min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
             if holders < min_holders:
                 elim_reason = (f"币龄{_fmt_age(age_hours)} 持币数{holders}"
@@ -3620,7 +3647,10 @@ def elimination_check(queue: list[dict], now_ms: int,
         if not elim_reason and (t.get("socialCount", 0) or 0) < 1:
             elim_reason = "缺少社交媒体链接"
 
-        # 3. 持币数按币龄逐级淘汰
+        # 3. 持币数查不到/为0直接淘汰，其余按币龄逐级淘汰
+        if not elim_reason and _quality_float(current_holders) <= 0:
+            elim_reason = "持币数查询失败或为0"
+
         if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
             min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
             if current_holders < min_holders:
@@ -5346,7 +5376,10 @@ def scan_once(cfg: dict) -> dict:
         if not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
             elim_reason = (f"最高价{peak_price:.2e}>精筛上限"
                            f"{QUALITY_PEAK_PRICE_MAX:.2e}")
-        # 持币数按币龄逐级淘汰
+        # 持币数查不到/为0直接淘汰，其余按币龄逐级淘汰
+        if not elim_reason and _quality_float(current_holders) <= 0:
+            elim_reason = "持币数查询失败或为0"
+
         if not elim_reason and age_hours >= ELIM_LOW_HOLDERS_AGE_HOURS:
             min_holders = _age_tier_match(age_hours, ELIM_HOLDER_TIERS)
             if current_holders < min_holders:
