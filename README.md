@@ -343,6 +343,13 @@ python3 src/scanner.py
 
 1. DexScreener 实时价快照取 max（每轮必做）
 
+### 价格单位与数据源
+
+- 价格统一保存为 USD/USDT 单位。
+- DexScreener 有多个交易池时，使用 USD 流动性最大的池的 `priceUsd`，避免尘埃池或旧池异常价格。
+- Four.meme bonding curve 的 BNB/WBNB 原生报价（包括缺失计价字段的响应）乘以实时 BNB/USD；稳定币报价直接使用。
+- 无法识别计价币时不使用原始价格，等待 DexScreener USD 价格，防止原生报价被误当成 USD。
+
 ### 持币数查询方案
 
 持币数是筛选和淘汰的核心指标，但 four.meme 代币的生命周期跨越 bonding curve 和 DEX 两个阶段，没有单一数据源能覆盖全程。当前采用多源互补策略：

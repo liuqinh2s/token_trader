@@ -964,13 +964,33 @@ def detect_copycats(tokens: list[dict],
 # ===================================================================
 #  four.meme API 层
 # ===================================================================
+def _fm_price_to_usd(price_raw: float, quote_symbol: str | None) -> float:
+    """Convert a Four.meme bonding-curve quote into USD without guessing it is USD."""
+    if price_raw <= 0:
+        return 0.0
+
+    quote = (quote_symbol or "").strip().upper()
+    if quote in ("USDT", "USDC", "BUSD", "USD1"):
+        return price_raw
+    if quote in ("", "BNB", "WBNB"):
+        # Four.meme BSC curves are BNB quoted. Some API responses omit symbol,
+        # so an empty quote must not be treated as an already-USD price.
+        return price_raw * _bnb_usd_price
+
+    # An unknown quote cannot be converted safely. Returning zero lets the
+    # caller prefer DexScreener USD data and prevents native quotes passing
+    # USD-denominated quality filters.
+    log.warning("Four.meme 未知计价币 %s, 忽略原始价格", quote)
+    return 0.0
+
+
 def fm_detail(address: str) -> dict | None:
     """获取代币详情 (four.meme Detail API)
     
     价格转换规则:
-    - symbol == "BNB": price 是 BNB 计价, 需要乘以 BNB/USD 转换为 USD
-    - symbol == "USDT" 等稳定币: price 已是 USD 计价, 无需转换
-    - 其他: 无法确定计价单位, 返回原值 (依赖 DexScreener 提供 USD 价格)
+    - BNB/WBNB 或缺失计价字段: 按 BNB 计价乘以 BNB/USD
+    - USDT/USDC/BUSD/USD1: 已是 USD 计价
+    - 其他未知计价币: 返回 0, 等待 DexScreener 的 USD 价格
     """
     _ensure_sessions()
     try:
@@ -992,18 +1012,11 @@ def fm_detail(address: str) -> dict | None:
         launch_ts = int(raw.get("launchTime", 0) or 0)
         if launch_ts <= 0:
             launch_ts = int(raw.get("createTime", 0) or raw.get("createdAt", 0) or 0)
-        # 根据 symbol 字段判断计价代币, 进行价格转换
-        quote_symbol = (raw.get("symbol") or "").upper()
+        # Four.meme 的 symbol 表示曲线计价币（代币简称在 shortName）。
+        # 个别响应会缺失 symbol；BSC 曲线此时仍按 BNB 计价。
+        quote_symbol = raw.get("symbol")
         price_raw = float(tp.get("price", 0) or 0)
-        if quote_symbol == "BNB":
-            # BNB 计价 → 乘以 BNB/USD
-            price_usd = price_raw * _bnb_usd_price
-        elif quote_symbol in ("USDT", "USDC", "BUSD", "USD1"):
-            # 稳定币计价 → 已是 USD
-            price_usd = price_raw
-        else:
-            # 未知计价单位 → 返回原值, 依赖 DexScreener 提供 USD 价格
-            price_usd = price_raw
+        price_usd = _fm_price_to_usd(price_raw, quote_symbol)
         return {
             "holders": int(tp.get("holderCount", 0) or 0),
             "price": price_usd,
@@ -2625,7 +2638,12 @@ def ds_batch_prices(addresses: list[str]) -> dict[str, dict]:
                     if not p.get("baseToken"):
                         continue
                     addr = p["baseToken"]["address"].lower()
-                    if addr in result:
+                    pair_liquidity = float((p.get("liquidity") or {}).get("usd") or 0)
+                    # DexScreener may return several pools for one token. The
+                    # first item is not guaranteed to be the canonical pool;
+                    # keep the deepest USD pool to avoid stale/dust-pair prices.
+                    if (addr in result
+                            and pair_liquidity <= result[addr].get("liquidity", 0)):
                         continue
                     # 提取买卖笔数 (DexScreener txns 字段)
                     txns = p.get("txns") or {}
@@ -2643,7 +2661,7 @@ def ds_batch_prices(addresses: list[str]) -> dict[str, dict]:
                     boosts_active = int(boosts_info.get("active") or 0)
                     result[addr] = {
                         "price": float(p.get("priceUsd") or 0),
-                        "liquidity": float((p.get("liquidity") or {}).get("usd") or 0),
+                        "liquidity": pair_liquidity,
                         "volume24h": float((p.get("volume") or {}).get("h24") or 0),
                         "volumeH1": float((p.get("volume") or {}).get("h1") or 0),
                         "buysH1": buys_h1,
