@@ -3189,10 +3189,17 @@ def admission_filter(new_tokens: list[dict], existing_addrs: set[str]) -> tuple[
     flap_social = {}
     if flap_tokens:
         flap_addrs = [t["address"] for t in flap_tokens]
-        flap_ds_data = ds_batch_prices(flap_addrs)
-        flap_states = flap_get_token_states(flap_addrs)
-        flap_social = flap_batch_details(flap_tokens)
-        flap_supplies = erc20_total_supplies(flap_addrs)
+        # 这四组数据互不依赖，串行执行会把网络等待相加。
+        # 并行后总耗时由最慢的一组接口决定。
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            ds_future = pool.submit(ds_batch_prices, flap_addrs)
+            state_future = pool.submit(flap_get_token_states, flap_addrs)
+            social_future = pool.submit(flap_batch_details, flap_tokens)
+            supply_future = pool.submit(erc20_total_supplies, flap_addrs)
+            flap_ds_data = ds_future.result()
+            flap_states = state_future.result()
+            flap_social = social_future.result()
+            flap_supplies = supply_future.result()
 
     # 逐个判断入场条件
     for t in fresh:
@@ -5229,8 +5236,10 @@ def scan_once(cfg: dict) -> dict:
     # Step 2b: 新入队代币持仓占比采集 (币安 Web3, 数据积累)
     bscscan_key = cfg.get("bscscan_api_key", "")
     if admitted:
-        new_addrs = [item["token"]["address"] for item in admitted]
-        log.info("币安持仓占比采集: 查询 %d 个新入队代币...", len(new_addrs))
+        # four.meme 入场 detail 已经提供持币数；币安动态只负责 Flap。
+        new_addrs = [item["token"]["address"] for item in admitted
+                     if item["token"].get("source") == "flap"]
+        log.info("币安持仓占比采集: 查询 %d 个新入队 Flap 代币...", len(new_addrs))
         bn_dynamic = fetch_binance_token_dynamic(new_addrs)
         updated_dynamic = apply_binance_dynamic_data(
             queue_state["tokens"], bn_dynamic, update_previous=False)
@@ -5337,12 +5346,13 @@ def scan_once(cfg: dict) -> dict:
     # 精筛 (币龄<=1h && 当前价<=0.000004 && 最高价<=0.00001
     #       && Top10<=20%)
     # 社交质量仅供展示, 不参与当前精筛规则
-    batch_check_social_quality(survivors)
     # 计算大盘情绪
     market_sentiment = calc_market_sentiment(survivors, queue_state)
     scan_round = queue_state.get("scanRound", _scan_count - 1) + 1
     tag_results, _ = tag_filter(survivors, now_ms, market_sentiment)
     quality_results = tag_results
+    # 社交质量只用于精筛结果展示，不对全部存活队列重复发起请求。
+    batch_check_social_quality(quality_results)
 
     # 精筛代币持币数刷新: 用 BSCScan 网页爬取真实持币数 (four.meme detail 对未毕业币不准)
     # 必须在再验证之前执行, 否则再验证用的是旧数据

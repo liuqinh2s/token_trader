@@ -88,12 +88,6 @@ for (const old of fs.readdirSync(SCANS_DIR)) {
   fs.unlinkSync(path.join(SCANS_DIR, old));
 }
 
-// Read all scan files from data/, sorted newest first
-const scanFiles = fs.readdirSync(DATA_DIR)
-  .filter(f => f.endsWith(".json") && f !== "queue.json" && f !== "smart_money.json")
-  .sort()
-  .reverse();
-
 // 近 2 天的文件用于前端展示和分析 (超过 48 小时的数据已被 scan.py 清理)
 const DISPLAY_DAYS = 2;
 const displayCutoff = new Date(Date.now() - DISPLAY_DAYS * 24 * 60 * 60 * 1000);
@@ -109,14 +103,21 @@ function parseFileDate(filename) {
   } catch { return null; }
 }
 
+// Enforce retention before any JSON is loaded into memory.
+const scanFiles = fs.readdirSync(DATA_DIR)
+  .filter(f => f.endsWith(".json") && f !== "queue.json" && f !== "smart_money.json")
+  .filter(f => {
+    const date = parseFileDate(f);
+    return date && date >= displayCutoff;
+  })
+  .sort()
+  .reverse();
+
 const displayFiles = scanFiles.filter(f => {
   const d = parseFileDate(f);
   return d && d >= displayCutoff;
 });
-const analysisOnlyFiles = scanFiles.filter(f => {
-  const d = parseFileDate(f);
-  return d && d < displayCutoff;
-});
+const analysisOnlyFiles = [];
 
 console.log(`[BUILD] Data files: ${scanFiles.length} total, ${displayFiles.length} for display (${DISPLAY_DAYS}d), ${analysisOnlyFiles.length} for analysis only.`);
 
