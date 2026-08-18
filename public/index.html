@@ -2145,17 +2145,11 @@
           <span class="qtab-count" id="mobileQualityMissedCount">0</span>
           <span class="qtab-label" id="mobileQualityMissedLabel">漏掉</span>
         </button>
-        <button class="quality-tab-btn" data-mqtab="gainers" onclick="switchMobileQualityTab('gainers')">
-          <span class="qtab-icon">🚀</span>
-          <span class="qtab-count" id="mobileQualityGainerCount">0</span>
-          <span class="qtab-label" id="mobileQualityGainerLabel">涨幅榜</span>
-        </button>
       </div>
     </div>
     <div class="quality-page-list" id="mobileQualitySuccessList"></div>
     <div class="quality-page-list hidden" id="mobileQualityFailList"></div>
     <div class="quality-page-list hidden" id="mobileQualityMissedList"></div>
-    <div class="quality-page-list hidden" id="mobileQualityGainerList"></div>
   </div>
 
   <!-- 设置页面 -->
@@ -3283,7 +3277,6 @@
       const d = qualityStatsData;
       const tp = d.tpTriggerPct || 100;
       const mp = d.missedThresholdPct || 100;
-      const gp = d.gainerThresholdPct || 100;
 
       const badge = document.getElementById('mobileQualityRateBadge');
       if (badge) badge.textContent = d.successRate + '%';
@@ -3293,21 +3286,16 @@
       if (fc) fc.textContent = d.failCount;
       const mc = document.getElementById('mobileQualityMissedCount');
       if (mc) mc.textContent = d.missedCount || 0;
-      const gc = document.getElementById('mobileQualityGainerCount');
-      if (gc) gc.textContent = d.gainerCount || 0;
       const sl = document.getElementById('mobileQualitySuccessLabel');
       if (sl) sl.textContent = '成功 (涨≥' + tp + '%)';
       const fl = document.getElementById('mobileQualityFailLabel');
       if (fl) fl.textContent = '失败 (<' + tp + '%)';
       const ml = document.getElementById('mobileQualityMissedLabel');
       if (ml) ml.textContent = '漏掉 (涨≥' + mp + '%)';
-      const gl = document.getElementById('mobileQualityGainerLabel');
-      if (gl) gl.textContent = '涨幅≥' + gp + '%';
 
       renderQualityList('mobileQualitySuccessList', d.successTokens || [], false, 'success');
       renderQualityList('mobileQualityFailList', d.failTokens || [], false, 'fail');
       renderQualityList('mobileQualityMissedList', d.missedTokens || [], true, 'missed');
-      renderQualityList('mobileQualityGainerList', d.gainerTokens || [], false, 'gainers');
     }
 
     function qualityCardPointerDown(e) {
@@ -3343,7 +3331,7 @@
     async function resolveQualityScanId(scanId, addr) {
       if (scanId !== '' && scanId != null && scanId !== 'null' && scanId !== 'undefined') return Number(scanId);
       const token = (qualityStatsData?.successTokens || [])
-        .concat(qualityStatsData?.failTokens || [], qualityStatsData?.gainerTokens || [])
+        .concat(qualityStatsData?.failTokens || [], qualityStatsData?.missedTokens || [])
         .find(t => (t.address || '').toLowerCase() === (addr || '').toLowerCase() && t.entryTime);
       if (!token) return null;
       const rows = await cachedFetch('data/history.json');
@@ -3384,15 +3372,7 @@
       const latestGrowthCls = t.latestGrowth >= 0 ? 'positive' : 'negative';
       const latestGrowthSign = t.latestGrowth >= 0 ? '+' : '';
 
-      // 来源标签 (涨幅榜专属)
-      let sourceTag = '';
-      if (source === 'gainers') {
-        if (t.source === 'filtered') {
-          sourceTag = '<span class="tag tag-bonus-good" style="font-size:9px;padding:2px 6px;margin-right:4px">✅精筛推荐</span>';
-        } else {
-          sourceTag = '<span class="tag tag-bonus-warn" style="font-size:9px;padding:2px 6px;margin-right:4px">🔥漏掉</span>';
-        }
-      }
+      const sourceTag = '';
 
       // 淘汰原因 (仅漏掉的好币显示)
       const elimReasonHtml = source === 'missed' && t.elimReason ? `<span class="quality-card-elim">${esc(t.elimReason)}</span>` : '';
@@ -3466,7 +3446,6 @@
       document.getElementById('mobileQualitySuccessList').classList.toggle('hidden', tab !== 'success');
       document.getElementById('mobileQualityFailList').classList.toggle('hidden', tab !== 'fail');
       document.getElementById('mobileQualityMissedList').classList.toggle('hidden', tab !== 'missed');
-      document.getElementById('mobileQualityGainerList').classList.toggle('hidden', tab !== 'gainers');
     }
 
     loadLatest();

@@ -52,10 +52,10 @@ function fetchDataFromGitBranch() {
 }
 
 // 精筛成功判定阈值 (%), 精筛成功率以此为判定标准
-const TP_TRIGGER_PCT = 100;
+const TP_TRIGGER_PCT = 1000;
 
 // 漏掉的好币判定阈值: 峰值涨幅 ≥ 此百分比视为"好币"
-const MISSED_THRESHOLD_PCT = 100;
+const MISSED_THRESHOLD_PCT = 1000;
 
 // 蹭名币黑名单 (与 scanner.py FAKE_NAME_BLACKLIST 同步)
 // symbol 或 name 精确匹配即排除, 小写比较
@@ -436,67 +436,21 @@ if (scanFiles.length === 0) {
   const totalQuality = successTokens.length + failTokens.length;
   const successRate = totalQuality > 0 ? Math.round(successTokens.length / totalQuality * 10000) / 100 : 0;
 
-  // ===== 涨幅榜: 所有峰值涨幅 ≥ 100% 的代币 (含精筛成功+漏掉+队列中未精筛) =====
-  const GAINER_THRESHOLD_PCT = 100;
-  const GAINER_THRESHOLD = 1 + GAINER_THRESHOLD_PCT / 100;
-
-  // 收集所有涨幅 ≥ 100% 的代币 (从 missedMap 和 qualityMap 中筛选)
-  const allGainersMap = {};
-
-  // 从 qualityMap 收集 (精筛通过的代币)
-  for (const [addr, info] of Object.entries(qualityMap)) {
-    if (info.entryPrice <= 0) continue;
-    const peakGrowth = (info.peakPrice - info.entryPrice) / info.entryPrice;
-    if (info.peakPrice >= info.entryPrice * GAINER_THRESHOLD) {
-      allGainersMap[addr] = {
-        ...info,
-        peakGrowth: Math.round(peakGrowth * 10000) / 100,
-        latestGrowth: Math.round(((info.latestPrice - info.entryPrice) / info.entryPrice) * 10000) / 100,
-        source: 'filtered',  // 来源: 精筛推荐
-      };
-    }
-  }
-
-  // 从 missedMap 收集 (队列中但未精筛通过的代币)
-  for (const [addr, info] of Object.entries(missedMap)) {
-    if (info.entryPrice <= 0) continue;
-    if (allGainersMap[addr]) continue;  // 已在精筛中记录
-    const peakGrowth = (info.peakPrice - info.entryPrice) / info.entryPrice;
-    if (info.peakPrice >= info.entryPrice * GAINER_THRESHOLD) {
-      // 排除蹭名币
-      const sym = (info.symbol || '').trim().toLowerCase();
-      const nm = (info.name || '').trim().toLowerCase();
-      if (FAKE_NAME_BLACKLIST.has(sym) || FAKE_NAME_BLACKLIST.has(nm)) continue;
-      allGainersMap[addr] = {
-        ...info,
-        peakGrowth: Math.round(peakGrowth * 10000) / 100,
-        latestGrowth: Math.round(((info.latestPrice - info.entryPrice) / info.entryPrice) * 10000) / 100,
-        source: filteredAddrs.has(addr) ? 'filtered' : 'missed',  // 来源: 精筛推荐 或 漏掉
-      };
-    }
-  }
-
-  // 按首次发现时间降序排列 (新币在前)
-  const allGainers = Object.values(allGainersMap).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
   const qualityStats = {
     tpTriggerPct: TP_TRIGGER_PCT,
     missedThresholdPct: MISSED_THRESHOLD_PCT,
-    gainerThresholdPct: GAINER_THRESHOLD_PCT,
     totalCount: successTokens.length + failTokens.length,  // 使用唯一代币数
     successCount: successTokens.length,
     failCount: failTokens.length,
     missedCount: missedTokens.length,
-    gainerCount: allGainers.length,
     successRate: successRate,
     successTokens: successTokens,
     failTokens: failTokens,
     missedTokens: missedTokens,
-    gainerTokens: allGainers,
   };
 
   fs.writeFileSync(path.join(SITE_DATA_DIR, "quality-stats.json"), JSON.stringify(qualityStats));
-  console.log(`[BUILD] Quality stats: ${totalFilteredCount} filtered, ${successTokens.length} success (${successRate}%), ${failTokens.length} fail, ${missedTokens.length} missed (≥${MISSED_THRESHOLD_PCT}%), ${allGainers.length} gainers (≥${GAINER_THRESHOLD_PCT}%). (2-day data)`);
+  console.log(`[BUILD] Quality stats: ${totalFilteredCount} filtered, ${successTokens.length} success (${successRate}%), ${failTokens.length} fail, ${missedTokens.length} missed (≥${MISSED_THRESHOLD_PCT}%). (2-day data)`);
   console.log(`[BUILD] Generated: ${displayFiles.length} scans for display, ${scanFiles.length} scans for analysis.`);
 }
 
