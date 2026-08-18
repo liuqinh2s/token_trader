@@ -1,13 +1,13 @@
 name: BSC Token Scan
 
 on:
-  workflow_dispatch:         # Manual trigger
+  workflow_dispatch:
   push:
     branches:
-      - main                 # Auto trigger on push to main
+      - main
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -33,66 +33,28 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Restore queue state from data branch
+      - name: Restore scanner state from Pages
         run: |
-          git stash
-          if git ls-remote --exit-code origin data >/dev/null 2>&1; then
-            echo "Fetching queue state from data branch..."
-            git checkout -B data origin/data
-            if [ -f data/queue.json ]; then
-              mkdir -p /tmp/queue_backup
-              cp data/queue.json /tmp/queue_backup/
-              echo "Restored queue.json from previous run"
-            fi
-            git checkout main
-            if [ -f /tmp/queue_backup/queue.json ]; then
-              mkdir -p data
-              cp /tmp/queue_backup/queue.json data/
-              echo "Using restored queue state"
-            fi
+          mkdir -p data
+          curl -fsSL --retry 2 https://liuqinh2s.github.io/token_trader/data/queue.json -o /tmp/queue.json || true
+          curl -fsSL --retry 2 https://liuqinh2s.github.io/token_trader/data/scan-history.json -o /tmp/scan-history.json || true
+          if node src/restore_pages_data.js /tmp/scan-history.json /tmp/queue.json; then
+            echo "Restored scanner state from Pages"
+          else
+            echo "Pages state not available yet; migrating the last data-branch snapshot"
+            git fetch --depth=1 origin data:refs/remotes/origin/data
+            git checkout refs/remotes/origin/data -- data/
           fi
-          git stash pop || true
 
       - name: Run scan (GitHub Actions mode)
         run: python3 src/scan.py
         env:
           BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
 
-      - name: Push data to data branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          mkdir -p /tmp/scan-data/data
-          cp -a data/. /tmp/scan-data/data/ 2>/dev/null || true
-          git stash
-          if git ls-remote --exit-code origin data >/dev/null 2>&1; then
-            echo "Fetching existing data branch..."
-            git checkout -B data origin/data
-            mkdir -p /tmp/existing-data/data
-            cp -a data/. /tmp/existing-data/data/ 2>/dev/null || true
-          else
-            echo "Creating new data branch..."
-            git checkout --orphan data
-            git rm -rf . 2>/dev/null || true
-            mkdir -p data
-          fi
-          cp -a /tmp/scan-data/data/. data/ 2>/dev/null || true
-          if [ -d /tmp/existing-data/data ]; then
-            for f in /tmp/existing-data/data/*.json; do
-              fname=$(basename "$f")
-              if [ ! -f "data/$fname" ]; then
-                cp "$f" "data/$fname"
-              fi
-            done
-          fi
-          git add -f data/
-          git commit -m "🔍 Scan $(date -u +%Y-%m-%d\ %H:%M) UTC" || echo "No changes to commit"
-          git push -f origin data
-          git checkout main
-          git stash pop || true
-
       - name: Build site
         run: node src/build.js
+        env:
+          SKIP_DATA_FETCH: '1'
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -26,6 +26,10 @@ const SCANS_DIR = path.join(SITE_DATA_DIR, "scans");
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 function fetchDataFromGitBranch() {
+  if (process.env.SKIP_DATA_FETCH === "1") {
+    console.log("[BUILD] Using data already restored by the workflow.");
+    return;
+  }
   const repoRoot = path.join(__dirname, "..");
   if (fs.existsSync(path.join(repoRoot, ".git"))) {
     try {
@@ -494,6 +498,17 @@ if (scanFiles.length === 0) {
   console.log(`[BUILD] Quality stats: ${totalFilteredCount} filtered, ${successTokens.length} success (${successRate}%), ${failTokens.length} fail, ${missedTokens.length} missed (≥${MISSED_THRESHOLD_PCT}%), ${allGainers.length} gainers (≥${GAINER_THRESHOLD_PCT}%). (2-day data)`);
   console.log(`[BUILD] Generated: ${displayFiles.length} scans for display, ${scanFiles.length} scans for analysis.`);
 }
+
+// Pages is the durable data store in CI; keep queue and rolling raw scans
+// available for the next run without committing them to the source repository.
+if (fs.existsSync(path.join(DATA_DIR, "queue.json"))) {
+  fs.copyFileSync(path.join(DATA_DIR, "queue.json"), path.join(SITE_DATA_DIR, "queue.json"));
+}
+const historyStore = scanFiles.map(file => ({
+  file,
+  data: JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), "utf-8")),
+}));
+fs.writeFileSync(path.join(SITE_DATA_DIR, "scan-history.json"), JSON.stringify(historyStore));
 
 // Copy and patch index.html
 let html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf-8");

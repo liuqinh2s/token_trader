@@ -2527,7 +2527,7 @@
         const dotHtml = hasPassed ? '<span class="hist-dot"></span>' : '';
         return `<div class="hist-row${activeHistoryId === r.id ? ' active' : ''}" onclick="loadScanMobile(${r.id})" data-id="${r.id}">
         <span class="ht">${r.scan_time}</span>
-        <span class="hist-stats">新币:${r.new_token_count != null ? r.new_token_count : '?'} | 队列:${r.queue_size != null ? r.queue_size : r.total_tokens} | 淘汰:${r.eliminated_count || 0} | ${dotHtml}精筛:<span class="hv">${r.filtered_tokens}</span></span>
+        <span class="hist-stats">新币:${r.new_token_count != null ? r.new_token_count : '?'} | 队列:${r.queue_size != null ? r.queue_size : r.total_tokens} | 淘汰:${r.eliminated_count || 0} | 拒绝:${r.rejected_count || 0} | ${dotHtml}精筛:<span class="hv">${r.filtered_tokens}</span></span>
       </div>`;
       }).join('');
     }

@@ -60,6 +60,7 @@ import sys
 import os
 import sqlite3
 import uuid
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from requests.adapters import HTTPAdapter
@@ -2243,20 +2244,25 @@ def fetch_binance_smart_signals() -> dict[str, dict]:
 
 def fetch_binance_token_dynamic(addresses: list[str]) -> dict[str, dict]:
     """
-    从币安 Web3 Token Dynamic Data API 批量获取代币动态数据
-    连续 3 次失败则判定 API 不可用, 快速放弃
+    从币安 Web3 Token Dynamic Data API 获取代币动态数据。
+    请求启动速度仍限制在 4 req/s，但网络等待允许并发重叠。
     """
     _ensure_sessions()
     result: dict[str, dict] = {}
     if not addresses:
         return result
 
-    consec_fails = 0
-    for i, addr in enumerate(addresses):
-        if consec_fails >= 3:
-            log.info("币安动态: 连续失败 %d 次, 跳过剩余 %d 个", consec_fails, len(addresses) - i)
-            break
+    unique_addresses = list(dict.fromkeys(a.lower() for a in addresses if a))
+    rate_lock = threading.Lock()
+    next_request_at = [time.monotonic()]
 
+    def _fetch_one(addr: str) -> tuple[str, dict | None]:
+        with rate_lock:
+            scheduled_at = next_request_at[0]
+            next_request_at[0] = max(scheduled_at, time.monotonic()) + 0.25
+        wait = scheduled_at - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
         try:
             resp = _bn_session.get(
                 BINANCE_TOKEN_DYNAMIC,
@@ -2264,17 +2270,14 @@ def fetch_binance_token_dynamic(addresses: list[str]) -> dict[str, dict]:
                 timeout=5,
             )
             if resp.status_code != 200:
-                consec_fails += 1
-                continue
+                return addr, None
 
             body = resp.json()
             if body.get("code") != "000000" or not body.get("data"):
-                consec_fails += 1
-                continue
+                return addr, None
 
-            consec_fails = 0
             d = body["data"]
-            result[addr.lower()] = {
+            return addr, {
                 "price": float(d.get("price") or 0),
                 "holders": int(d.get("holders") or 0),
                 "liquidity": float(d.get("liquidity") or 0),
@@ -2293,10 +2296,14 @@ def fetch_binance_token_dynamic(addresses: list[str]) -> dict[str, dict]:
                 "proHoldPct": float(d.get("proHoldingPercent") or 0),
             }
         except Exception:
-            consec_fails += 1
+            return addr, None
 
-        if i < len(addresses) - 1:
-            time.sleep(0.25)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(_fetch_one, addr) for addr in unique_addresses]
+        for future in as_completed(futures):
+            addr, data = future.result()
+            if data:
+                result[addr] = data
 
     if result:
         log.info("币安代币动态: 获取 %d/%d 个代币数据", len(result), len(addresses))
@@ -2313,6 +2320,8 @@ def apply_binance_dynamic_data(tokens: list[dict], dynamic: dict[str, dict],
         dyn = dynamic.get(addr)
         if not dyn:
             continue
+
+        t["_binanceDynamicAt"] = int(time.time() * 1000)
 
         prev_dev = t.get("devHoldPct")
         if update_previous and prev_dev is not None:
@@ -2889,12 +2898,12 @@ def graduated_holder_counts(addresses: list[str]) -> dict[str, int]:
     if not addresses:
         return result
 
-    # 并发爬取 BSCScan 网页 (3 线程, 避免被限流)
+    # 适度提高并发；失败仍按“查不到即淘汰”处理，不做缓存豁免。
     def _scrape_one(addr: str) -> tuple[str, int | None]:
         count = bscscan_scrape_holder_count(addr)
         return addr, count
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         futures = [pool.submit(_scrape_one, addr) for addr in addresses]
         for f in as_completed(futures):
             addr, count = f.result()
@@ -5082,6 +5091,15 @@ def scan_once(cfg: dict) -> dict:
 
     # 计时开始
     _t_start = time.time()
+    _stage_started = _t_start
+    _stage_timings: dict[str, float] = {}
+
+    def _mark_stage(name: str) -> None:
+        nonlocal _stage_started
+        elapsed = time.time() - _stage_started
+        _stage_timings[name] = round(elapsed, 2)
+        _stage_started = time.time()
+        log.info("性能计时: %s %.2f 秒", name, elapsed)
 
     # 行情
     global _bnb_usd_price
@@ -5220,6 +5238,25 @@ def scan_once(cfg: dict) -> dict:
             log.info("币安持仓占比采集: %d/%d 个代币有数据, 写入 %d 个",
                      len(bn_dynamic), len(new_addrs), updated_dynamic)
 
+    # Flap 没有可靠的 detail 持币数，只刷新超过 15 分钟的 Flap 缓存。
+    # 新入队币刚在上面查询过，不会在同一轮重复请求。
+    dynamic_cutoff = now_ms - 15 * 60 * 1000
+    stale_flap = [
+        t for t in queue_state["tokens"]
+        if t.get("source") == "flap"
+        and int(t.get("_binanceDynamicAt") or 0) < dynamic_cutoff
+    ]
+    if stale_flap:
+        stale_addrs = [t["address"] for t in stale_flap if t.get("address")]
+        log.info("Flap 持币数刷新: 查询 %d 个缓存过期代币...", len(stale_addrs))
+        flap_dynamic = fetch_binance_token_dynamic(stale_addrs)
+        apply_binance_dynamic_data(stale_flap, flap_dynamic)
+        for token in stale_flap:
+            if token.get("address", "").lower() not in flap_dynamic:
+                token["holders"] = 0
+
+    _mark_stage("发现+入场+Flap动态")
+
     # Step 3: 淘汰检查
     log.info("\n--- Step 3: 淘汰检查 ---")
     bscscan_key = cfg.get("bscscan_api_key", "")
@@ -5244,6 +5281,7 @@ def scan_once(cfg: dict) -> dict:
     if queue_age_eliminated:
         eliminated = queue_age_eliminated + eliminated
     queue_state["tokens"] = survivors
+    _mark_stage("淘汰检查")
     queue_state["eliminated"].extend([{
         "address": e["address"], "name": e.get("name", ""),
         "symbol": e.get("symbol", ""),
@@ -5300,14 +5338,6 @@ def scan_once(cfg: dict) -> dict:
     #       && Top10<=20%)
     # 社交质量仅供展示, 不参与当前精筛规则
     batch_check_social_quality(survivors)
-    if survivors:
-        survivor_addrs = [t["address"] for t in survivors if t.get("address")]
-        log.info("币安持仓占比刷新: 查询 %d 个存活代币...", len(survivor_addrs))
-        survivor_dynamic = fetch_binance_token_dynamic(survivor_addrs)
-        updated_dynamic = apply_binance_dynamic_data(survivors, survivor_dynamic)
-        if survivor_dynamic:
-            log.info("币安持仓占比刷新: %d/%d 个代币有数据, 更新 %d 个",
-                     len(survivor_dynamic), len(survivor_addrs), updated_dynamic)
     # 计算大盘情绪
     market_sentiment = calc_market_sentiment(survivors, queue_state)
     scan_round = queue_state.get("scanRound", _scan_count - 1) + 1
@@ -5432,6 +5462,7 @@ def scan_once(cfg: dict) -> dict:
 
     # 精筛后防线: TOP10 持仓过度集中直接不通过精筛, 避免推送和自动买入。
     quality_results = post_quality_defense(quality_results, bscscan_key, cfg)
+    _mark_stage("社交+精筛+防线")
 
     # 按进度、持币数排序
     quality_results.sort(
@@ -5488,6 +5519,10 @@ def scan_once(cfg: dict) -> dict:
     queue_state["filteredTokens"] = len(quality_results_for_frontend)
     queue_state["totalTokens"] = len(survivors)
     queue_state["queueSize"] = len(survivors)
+    queue_state["scanTimings"] = {
+        **_stage_timings,
+        "totalSoFar": round(time.time() - _t_start, 2),
+    }
     
     # 计算近48小时淘汰数
     eliminated_history = queue_state.get("eliminatedHistory", [])
@@ -5544,7 +5579,11 @@ def scan_once(cfg: dict) -> dict:
 
     if not quality_results_for_dingding:
         log.info("本轮无推荐代币 (耗时 %.1f 秒)", time.time() - _t_start)
-        return
+        return {
+            "quality_results": quality_results_for_frontend,
+            "eliminated_this_round": eliminated,
+            "rejected_at_entry": rejected_at_entry,
+        }
 
     # 推送精筛结果 (代币详情, 不管是否开自动交易都推)
     # _bonus_score 仅作兼容字段；通过当前精筛策略即可推送/买入

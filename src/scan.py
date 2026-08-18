@@ -52,17 +52,7 @@ def main():
         _bsc_session = _build_session(cfg.get("proxy"), DS_HEADERS)
         _maybe_clean_logs()
 
-        scan_result = scan_once(cfg)
-
-        queue_state = load_queue()
-        if queue_state:
-            from scanner import output_scan_json
-            output_scan_json(
-                queue_state,
-                eliminated_this_round=scan_result.get("eliminated_this_round") if scan_result else None,
-                rejected_at_entry=scan_result.get("rejected_at_entry") if scan_result else None,
-                quality_results=scan_result.get("quality_results") if scan_result else None,
-            )
+        scan_once(cfg)
 
         log.info("✅ 扫描完成，JSON 已输出到 data/ 目录")
     except Exception as e:
