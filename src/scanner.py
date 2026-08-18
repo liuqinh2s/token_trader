@@ -258,16 +258,17 @@ SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
 # --- 当前精筛策略: 观察满12h后，从48h队列中挑选稳定缓涨的低价币 ---
-QUALITY_MIN_AGE_HOURS = 12.0
+QUALITY_MIN_AGE_HOURS = 10.0 / 60.0
 QUALITY_MAX_AGE_HOURS = 48.0
-QUALITY_MIN_PROGRESS = 0.50
-QUALITY_MIN_HOLDERS = 50
-QUALITY_CURRENT_PRICE_MAX = 0.00004
+QUALITY_MIN_HOLDERS = 30
+QUALITY_MAX_HOLDERS = 1500
+QUALITY_MIN_LIQUIDITY_USD = 150.0
+QUALITY_MIN_MARKET_CAP_USD = 4000.0
+QUALITY_MAX_MARKET_CAP_USD = 200000.0
+QUALITY_MIN_TXNS_24H = 10
+QUALITY_MIN_VOLUME_24H_USD = 50.0
+# Queue elimination still uses the historical peak-price guard.
 QUALITY_PEAK_PRICE_MAX = 0.0001
-QUALITY_MAX_DRAWDOWN_FROM_PEAK = 0.50
-QUALITY_STABILITY_WINDOW_HOURS = 12
-QUALITY_STABILITY_MAX_STEP_CHANGE = 0.20
-QUALITY_STABILITY_MAX_TOTAL_GAIN = 2.00
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -278,7 +279,6 @@ QUALITY_LIQUIDITY_MIN_USD = 15000
 QUALITY_PRICE_SURGE_MIN_GAIN = 0.20
 
 # --- 旧硬筛参数: 保留给历史 helper/回滚对照 ---
-QUALITY_MAX_HOLDERS = 50
 QUALITY_MAX_PRICE = 0.00002
 LEGACY_QUALITY_MIN_AGE_HOURS = 1.0
 QUALITY_MAX_COPYCAT_COUNT = 50
@@ -413,7 +413,7 @@ COPYCAT_BONUS_TIERS = [
 COPYCAT_MARK_MIN = 3    # 仿盘数 ≥3 在前端标记
 
 # --- 加分标签: TOP10 持仓占比 (用于淘汰/后防线, 非加分项) ---
-TOP10_CONCENTRATION_MAX = 0.20   # >20% 庄家控盘
+TOP10_CONCENTRATION_MAX = 0.60   # >60% 庄家控盘
 TOP10_CONCENTRATION_MIN = 0.20   # <20% 持仓太分散
 
 # --- 加分标签: 持币数 ≥1000 ---
@@ -2331,6 +2331,10 @@ def apply_binance_dynamic_data(tokens: list[dict], dynamic: dict[str, dict],
         if raw_top10 > 0:
             t["top10Concentration"] = round(raw_top10 / 100 if raw_top10 > 1 else raw_top10, 4)
 
+        # Binance dynamic is the market-cap source for quality filtering.
+        if _quality_float(dyn.get("marketCap")) > 0:
+            t["marketCap"] = _quality_float(dyn.get("marketCap"))
+
         # Flap 没有 detail API，入队持币数初始为 0。Binance dynamic 是其主要
         # 持币数来源；只在返回正数时覆盖，接口失败或暂未索引时保留缓存值。
         dynamic_holders = int(_quality_float(dyn.get("holders")))
@@ -4239,6 +4243,13 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
     current_price = _quality_float(t.get("price"))
+    liquidity = _quality_float(t.get("liquidity"))
+    market_cap = _quality_float(t.get("marketCap", t.get("market_cap")))
+    if market_cap <= 0 and current_price > 0:
+        market_cap = current_price * _quality_float(t.get("totalSupply"), 1_000_000_000)
+    txns_24h = int(_quality_float(t.get("buysH24"))) + int(_quality_float(t.get("sellsH24")))
+    volume_24h = _quality_float(t.get("volume24h"))
+    top10 = _quality_float(t.get("top10Concentration"))
     key_hold_metrics = _quality_key_hold_metrics(t)
     base_tags = []
     metrics = {
@@ -4246,79 +4257,42 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
         "progress": progress,
         "holders": holders,
         "price": current_price,
+        "liquidity": liquidity,
+        "market_cap": market_cap,
+        "txns_24h": txns_24h,
+        "volume_24h": volume_24h,
+        "top10": top10,
         **key_hold_metrics,
     }
 
     if age_hours < 0:
         return False, "币龄未知", base_tags, metrics
     if age_hours < QUALITY_MIN_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:g}h，观察不足", base_tags, metrics
+        return False, f"币龄{age_hours * 60:.1f}m<10m，观察不足", base_tags, metrics
     if age_hours > QUALITY_MAX_AGE_HOURS:
         return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄{QUALITY_MIN_AGE_HOURS:g}–{QUALITY_MAX_AGE_HOURS:g}h")
-
-    if progress < QUALITY_MIN_PROGRESS:
-        return False, f"进度{progress*100:.1f}%<{QUALITY_MIN_PROGRESS*100:.0f}%", base_tags, metrics
-    base_tags.append(f"进度≥{QUALITY_MIN_PROGRESS*100:.0f}%")
+    base_tags.append(f"币龄≥10m且≤{QUALITY_MAX_AGE_HOURS:g}h")
 
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币地址{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
-    base_tags.append(f"持币≥{QUALITY_MIN_HOLDERS}")
+    if holders > QUALITY_MAX_HOLDERS:
+        return False, f"持币地址{holders}>{QUALITY_MAX_HOLDERS}", base_tags, metrics
+    base_tags.append(f"持币{QUALITY_MIN_HOLDERS}–{QUALITY_MAX_HOLDERS}")
 
-    if current_price <= 0 or current_price > QUALITY_CURRENT_PRICE_MAX:
-        return False, (
-            f"当前价{current_price:.2e}>{QUALITY_CURRENT_PRICE_MAX:.2e}"
-        ), base_tags, metrics
-    base_tags.append(f"当前价≤{QUALITY_CURRENT_PRICE_MAX:.2e}")
-
-    peak_price = max(
-        _quality_float(t.get("peakPrice")),
-        _quality_float(t.get("max_price")),
-        _quality_float(t.get("ath")),
-        current_price,
-    )
-    metrics["peak_price"] = peak_price
-    if peak_price > QUALITY_PEAK_PRICE_MAX:
-        return False, (
-            f"最高价{peak_price:.2e}>{QUALITY_PEAK_PRICE_MAX:.2e}"
-        ), base_tags, metrics
-    base_tags.append(f"最高价≤{QUALITY_PEAK_PRICE_MAX:.2e}")
-
-    drawdown = 1 - current_price / peak_price if peak_price > 0 else 0
-    metrics["drawdown_from_peak"] = drawdown
-    if drawdown > QUALITY_MAX_DRAWDOWN_FROM_PEAK:
-        return False, (
-            f"距最高价回撤{drawdown*100:.1f}%>"
-            f"{QUALITY_MAX_DRAWDOWN_FROM_PEAK*100:.0f}%"
-        ), base_tags, metrics
-    base_tags.append(f"峰值回撤≤{QUALITY_MAX_DRAWDOWN_FROM_PEAK*100:.0f}%")
-
-    price_hist = _history_with_current(t, "priceHistory", "price")
-    stability_rounds = int(QUALITY_STABILITY_WINDOW_HOURS * 60 / SCAN_INTERVAL_MIN)
-    recent_prices = [p for p in price_hist[-stability_rounds:] if p > 0]
-    if len(recent_prices) < stability_rounds:
-        return False, (
-            f"稳定性观察不足{len(recent_prices)}/{stability_rounds}轮"
-        ), base_tags, metrics
-
-    step_changes = [cur / prev - 1 for prev, cur in zip(recent_prices, recent_prices[1:])]
-    max_step_change = max(abs(change) for change in step_changes)
-    total_gain = recent_prices[-1] / recent_prices[0] - 1
-    metrics["stability_max_step_change"] = max_step_change
-    metrics["stability_total_gain"] = total_gain
-    if max_step_change > QUALITY_STABILITY_MAX_STEP_CHANGE:
-        return False, (
-            f"单轮价格波动{max_step_change*100:.1f}%>"
-            f"{QUALITY_STABILITY_MAX_STEP_CHANGE*100:.0f}%"
-        ), base_tags, metrics
-    if total_gain < 0:
-        return False, f"近{QUALITY_STABILITY_WINDOW_HOURS}h价格走低{total_gain*100:.1f}%", base_tags, metrics
-    if total_gain > QUALITY_STABILITY_MAX_TOTAL_GAIN:
-        return False, (
-            f"近{QUALITY_STABILITY_WINDOW_HOURS}h涨幅{total_gain*100:.1f}%>"
-            f"{QUALITY_STABILITY_MAX_TOTAL_GAIN*100:.0f}%，上涨过快"
-        ), base_tags, metrics
-    base_tags.append(f"近{QUALITY_STABILITY_WINDOW_HOURS}h稳定缓涨")
+    if liquidity <= QUALITY_MIN_LIQUIDITY_USD:
+        return False, f"流动性${liquidity:.0f}≤$150", base_tags, metrics
+    base_tags.append("流动性>$150")
+    if market_cap < QUALITY_MIN_MARKET_CAP_USD or market_cap > QUALITY_MAX_MARKET_CAP_USD:
+        return False, f"市值${market_cap:.0f}不在$4k–$200k", base_tags, metrics
+    base_tags.append("市值$4k–$200k")
+    if txns_24h < QUALITY_MIN_TXNS_24H:
+        return False, f"24h交易数{txns_24h}<10", base_tags, metrics
+    base_tags.append("24h交易数≥10")
+    if volume_24h < QUALITY_MIN_VOLUME_24H_USD:
+        return False, f"24h交易量${volume_24h:.0f}<$50", base_tags, metrics
+    base_tags.append("24h交易量≥$50")
+    if top10 > TOP10_CONCENTRATION_MAX:
+        return False, f"Top10持仓{top10*100:.1f}%>60%", base_tags, metrics
 
     return True, "", base_tags, metrics
 
