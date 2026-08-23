@@ -7,11 +7,11 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
   1. 链上发现 (~1s): BSC RPC eth_getLogs → four.meme + flap 合约 TokenCreated 事件 → 新代币地址
   2. 入场筛 (~数秒): four.meme Detail API + flap.sh 页面 SSR 社交数据 + 链上 totalSupply → 淘汰总量≠10亿 / 币龄>5min
   3. 淘汰检查 (~数秒): DexScreener 批量查价(含涨跌幅/Boost) + BSCScan 持币数 + Detail API → 永久淘汰弃盘币
-  4. 精筛 (瞬时): 观察12~48h、进度>=50%、持币>=50、低价且稳定缓涨
+  4. 精筛 (瞬时): 观察6~48h、进度>=50%、持币>=50、低价且稳定缓涨
   5. 仿盘检测: 本地统计同名代币数量 (零 API 调用)
 
 当前精筛策略:
-  - 币龄 12~48h、进度 >= 50%、持币地址 >= 50
+  - 币龄 6~48h、进度 >= 50%、持币地址 >= 50
   - 当前价 <= 0.00002、最高价 <= 0.00006、距峰值回撤 <= 50%
   - 最近12h无单轮20%以上剧烈波动，整体缓涨且涨幅不超过200%
   - Top10 持仓占比 <= 20%
@@ -39,7 +39,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 注: 队列存活要求至少存在一个社交链接；入场筛阶段仍允许先进入队列等待补全数据
 
 精筛条件:
-  币龄12~48h && 进度>=50% && 持币>=50 && 当前价<=0.00004
+  币龄6~48h && 进度>=50% && 持币>=50 && 当前价<=0.00004
   && 最高价<=0.0001 && 峰值回撤<=50% && 最近12h稳定缓涨
   && Top10持仓<=20%
 
@@ -257,8 +257,8 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 观察满12h后，从48h队列中挑选稳定缓涨的低价币 ---
-QUALITY_MIN_AGE_HOURS = 12.0
+# --- 当前精筛策略: 观察满6h后，从48h队列中挑选稳定缓涨的低价币 ---
+QUALITY_MIN_AGE_HOURS = 6.0
 QUALITY_MAX_AGE_HOURS = 48.0
 QUALITY_MIN_HOLDERS = 30
 QUALITY_MAX_HOLDERS = 1500
@@ -4650,7 +4650,7 @@ def tag_filter(candidates: list[dict], now_ms: int,
                market_sentiment: dict | None = None) -> tuple[list[dict], list[dict]]:
     """
     精筛开仓策略:
-      - 币龄 12~48h、进度 >= 50%、持币地址 >= 50
+      - 币龄 6~48h、进度 >= 50%、持币地址 >= 50
       - 当前价 <= 0.00004、最高价 <= 0.0001、峰值回撤 <= 50%
       - 最近 12h 单轮波动 <= 20%，整体稳定缓涨
     """
