@@ -12,7 +12,7 @@ BSC Token Scanner v7 — 极速扫描, 以快致胜
 
 当前精筛策略:
   - 币龄 12~48h、进度 >= 50%、持币地址 >= 50
-  - 当前价 <= 0.00004、最高价 <= 0.0001、距峰值回撤 <= 50%
+  - 当前价 <= 0.00002、最高价 <= 0.00006、距峰值回撤 <= 50%
   - 最近12h无单轮20%以上剧烈波动，整体缓涨且涨幅不超过200%
   - Top10 持仓占比 <= 20%
 
@@ -258,7 +258,7 @@ SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
 # --- 当前精筛策略: 观察满12h后，从48h队列中挑选稳定缓涨的低价币 ---
-QUALITY_MIN_AGE_HOURS = 10.0 / 60.0
+QUALITY_MIN_AGE_HOURS = 12.0
 QUALITY_MAX_AGE_HOURS = 48.0
 QUALITY_MIN_HOLDERS = 30
 QUALITY_MAX_HOLDERS = 1500
@@ -268,7 +268,8 @@ QUALITY_MAX_MARKET_CAP_USD = 200000.0
 QUALITY_MIN_TXNS_24H = 10
 QUALITY_MIN_VOLUME_24H_USD = 50.0
 # Queue elimination still uses the historical peak-price guard.
-QUALITY_PEAK_PRICE_MAX = 0.0001
+QUALITY_MAX_PRICE = 0.00002
+QUALITY_PEAK_PRICE_MAX = 0.00006
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -279,7 +280,6 @@ QUALITY_LIQUIDITY_MIN_USD = 15000
 QUALITY_PRICE_SURGE_MIN_GAIN = 0.20
 
 # --- 旧硬筛参数: 保留给历史 helper/回滚对照 ---
-QUALITY_MAX_PRICE = 0.00002
 LEGACY_QUALITY_MIN_AGE_HOURS = 1.0
 QUALITY_MAX_COPYCAT_COUNT = 50
 QUALITY_MAX_PRICE_CHANGE_H1 = 100.0
@@ -4250,6 +4250,7 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     txns_24h = int(_quality_float(t.get("buysH24"))) + int(_quality_float(t.get("sellsH24")))
     volume_24h = _quality_float(t.get("volume24h"))
     top10 = _quality_float(t.get("top10Concentration"))
+    peak_price = _quality_float(t.get("peakPrice", t.get("max_price", 0)))
     key_hold_metrics = _quality_key_hold_metrics(t)
     base_tags = []
     metrics = {
@@ -4262,16 +4263,24 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
         "txns_24h": txns_24h,
         "volume_24h": volume_24h,
         "top10": top10,
+        "peak_price": peak_price,
         **key_hold_metrics,
     }
 
     if age_hours < 0:
         return False, "币龄未知", base_tags, metrics
     if age_hours < QUALITY_MIN_AGE_HOURS:
-        return False, f"币龄{age_hours * 60:.1f}m<10m，观察不足", base_tags, metrics
+        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:g}h，观察不足", base_tags, metrics
     if age_hours > QUALITY_MAX_AGE_HOURS:
         return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄≥10m且≤{QUALITY_MAX_AGE_HOURS:g}h")
+    base_tags.append(f"币龄≥{QUALITY_MIN_AGE_HOURS:g}h且≤{QUALITY_MAX_AGE_HOURS:g}h")
+
+    if current_price <= 0 or current_price > QUALITY_MAX_PRICE:
+        return False, f"当前价{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", base_tags, metrics
+    base_tags.append(f"当前价≤{QUALITY_MAX_PRICE:.2e}")
+    if peak_price > QUALITY_PEAK_PRICE_MAX:
+        return False, f"最高价{peak_price:.2e}>{QUALITY_PEAK_PRICE_MAX:.2e}", base_tags, metrics
+    base_tags.append(f"最高价≤{QUALITY_PEAK_PRICE_MAX:.2e}")
 
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币地址{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
