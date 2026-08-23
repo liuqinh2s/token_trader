@@ -2649,6 +2649,19 @@
 
     function buildAllTags(token) {
       let html = '';
+      const desc = String(token.descr || token.description || '');
+      const keywordTags = [
+        [['小红书'], '小红书'],
+        [['视频爆火', '爆火视频', '抖音', '抖音爆火'], '抖音'],
+        [['BSC Chain', 'BSC链', 'BSC'], 'BSC链'],
+        [['全球首个', '首个', '重大突破'], '创新类'],
+        [['病毒式', '出圈'], '病毒式']
+      ];
+      for (const [keywords, label] of keywordTags) {
+        if (keywords.some(k => desc.includes(k))) {
+          html += `<span class="tag tag-bonus-good" title="描述关键词">${label}</span>`;
+        }
+      }
       if (token.is_quality_deployer) {
         html += '<span class="tag tag-boost" title="该开发者曾发过10倍以上涨幅代币">⭐优质开发者</span>';
       }
@@ -3087,7 +3100,7 @@
           address: t.a, name: t.n, symbol: t.s, holders: t.h,
           created_at: t.c, price: t.p, max_price: t.mp || t.pp, ath: t.ath || t.mp || t.pp,
           price_ratio: t.pr, age_hours: t.ah, social_count: t.sc,
-          social_links: t.sl, copycat_count: t.cc || 0,
+          social_links: t.sl, descr: t.d || '', copycat_count: t.cc || 0,
           is_copycat: t.ic || false, total_supply: t.ts, day1_vol: t.dv,
           progress: t.pg, liquidity: t.lq || 0, raised_amount: t.ra || 0,
           market_cap: t.mc || 0, wallet_signals: t.ws || [], _scanTime: t.st,

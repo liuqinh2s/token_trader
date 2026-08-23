@@ -182,6 +182,7 @@ if (scanFiles.length === 0) {
       a: addr,
       n: t.name || '',
       s: t.symbol || '',
+      d: t.descr || t.description || '',
       h: t.holders || 0,
       c: t.created_at || 0,
       p: t.price || 0,
