@@ -4237,12 +4237,29 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     )
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
+    # Keep the full metric shape for downstream ranking, logging and UI code.
+    current_price = _quality_float(t.get("price"))
+    liquidity = _quality_float(t.get("liquidity"))
+    market_cap = _quality_float(t.get("marketCap", t.get("market_cap")))
+    if market_cap <= 0 and current_price > 0:
+        market_cap = current_price * _quality_float(t.get("totalSupply"), 1_000_000_000)
+    txns_24h = int(_quality_float(t.get("buysH24"))) + int(_quality_float(t.get("sellsH24")))
+    volume_24h = _quality_float(t.get("volume24h"))
+    top10 = _quality_float(t.get("top10Concentration"))
+    peak_price = _quality_float(t.get("peakPrice", t.get("max_price", 0)))
     key_hold_metrics = _quality_key_hold_metrics(t)
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
         "holders": holders,
+        "price": current_price,
+        "liquidity": liquidity,
+        "market_cap": market_cap,
+        "txns_24h": txns_24h,
+        "volume_24h": volume_24h,
+        "top10": top10,
+        "peak_price": peak_price,
         **key_hold_metrics,
     }
 
