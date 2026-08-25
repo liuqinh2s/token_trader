@@ -257,19 +257,13 @@ MAX_AGE_HOURS = 48
 SCAN_INTERVAL_MIN = 15
 TOTAL_SUPPLY = 1_000_000_000
 
-# --- 当前精筛策略: 观察满6h后，从48h队列中挑选稳定缓涨的低价币 ---
-QUALITY_MIN_AGE_HOURS = 6.0
-QUALITY_MAX_AGE_HOURS = 48.0
-QUALITY_MIN_HOLDERS = 30
-QUALITY_MAX_HOLDERS = 1500
-QUALITY_MIN_LIQUIDITY_USD = 150.0
-QUALITY_MIN_MARKET_CAP_USD = 4000.0
-QUALITY_MAX_MARKET_CAP_USD = 200000.0
-QUALITY_MIN_TXNS_24H = 10
-QUALITY_MIN_VOLUME_24H_USD = 50.0
-# Queue elimination still uses the historical peak-price guard.
-QUALITY_MAX_PRICE = 0.00002
-QUALITY_PEAK_PRICE_MAX = 0.00006
+# --- 当前精筛策略: 仅关注发币后最初 15 分钟的早期动能 ---
+# 精筛不通过只代表不推荐/不自动买入，绝不能作为队列淘汰依据。
+QUALITY_MIN_AGE_HOURS = 0.0
+QUALITY_MAX_AGE_HOURS = 0.25
+QUALITY_MIN_HOLDERS = 10
+QUALITY_MAX_HOLDERS = 50
+QUALITY_MIN_PROGRESS = 0.12
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -3389,7 +3383,8 @@ def elimination_check(queue: list[dict], now_ms: int,
                                f"<{min_holders}")
 
         peak_price = t.get("peakPrice", 0)
-        if not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
+        # 精筛价格上限不是存活队列淘汰条件；不满足精筛的代币仍需留在队列观察。
+        if False and not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
             elim_reason = (f"最高价{peak_price:.2e}>精筛上限"
                            f"{QUALITY_PEAK_PRICE_MAX:.2e}")
 
@@ -4242,66 +4237,32 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     )
     progress = _quality_float(t.get("progress"))
     holders = int(_quality_float(t.get("holders")))
-    current_price = _quality_float(t.get("price"))
-    liquidity = _quality_float(t.get("liquidity"))
-    market_cap = _quality_float(t.get("marketCap", t.get("market_cap")))
-    if market_cap <= 0 and current_price > 0:
-        market_cap = current_price * _quality_float(t.get("totalSupply"), 1_000_000_000)
-    txns_24h = int(_quality_float(t.get("buysH24"))) + int(_quality_float(t.get("sellsH24")))
-    volume_24h = _quality_float(t.get("volume24h"))
-    top10 = _quality_float(t.get("top10Concentration"))
-    peak_price = _quality_float(t.get("peakPrice", t.get("max_price", 0)))
     key_hold_metrics = _quality_key_hold_metrics(t)
     base_tags = []
     metrics = {
         "age_hours": age_hours,
         "progress": progress,
         "holders": holders,
-        "price": current_price,
-        "liquidity": liquidity,
-        "market_cap": market_cap,
-        "txns_24h": txns_24h,
-        "volume_24h": volume_24h,
-        "top10": top10,
-        "peak_price": peak_price,
         **key_hold_metrics,
     }
 
     if age_hours < 0:
         return False, "币龄未知", base_tags, metrics
     if age_hours < QUALITY_MIN_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h<{QUALITY_MIN_AGE_HOURS:g}h，观察不足", base_tags, metrics
+        return False, f"币龄{age_hours:.2f}h<0h", base_tags, metrics
     if age_hours > QUALITY_MAX_AGE_HOURS:
-        return False, f"币龄{age_hours:.2f}h>{QUALITY_MAX_AGE_HOURS:g}h", base_tags, metrics
-    base_tags.append(f"币龄≥{QUALITY_MIN_AGE_HOURS:g}h且≤{QUALITY_MAX_AGE_HOURS:g}h")
+        return False, f"币龄{age_hours * 60:.0f}分钟>15分钟", base_tags, metrics
+    base_tags.append("发币后15分钟内")
 
-    if current_price <= 0 or current_price > QUALITY_MAX_PRICE:
-        return False, f"当前价{current_price:.2e}>{QUALITY_MAX_PRICE:.2e}", base_tags, metrics
-    base_tags.append(f"当前价≤{QUALITY_MAX_PRICE:.2e}")
-    if peak_price > QUALITY_PEAK_PRICE_MAX:
-        return False, f"最高价{peak_price:.2e}>{QUALITY_PEAK_PRICE_MAX:.2e}", base_tags, metrics
-    base_tags.append(f"最高价≤{QUALITY_PEAK_PRICE_MAX:.2e}")
+    if progress < QUALITY_MIN_PROGRESS:
+        return False, f"进度{progress * 100:.1f}%<12%", base_tags, metrics
+    base_tags.append("进度≥12%")
 
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币地址{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
     if holders > QUALITY_MAX_HOLDERS:
         return False, f"持币地址{holders}>{QUALITY_MAX_HOLDERS}", base_tags, metrics
     base_tags.append(f"持币{QUALITY_MIN_HOLDERS}–{QUALITY_MAX_HOLDERS}")
-
-    if liquidity <= QUALITY_MIN_LIQUIDITY_USD:
-        return False, f"流动性${liquidity:.0f}≤$150", base_tags, metrics
-    base_tags.append("流动性>$150")
-    if market_cap < QUALITY_MIN_MARKET_CAP_USD or market_cap > QUALITY_MAX_MARKET_CAP_USD:
-        return False, f"市值${market_cap:.0f}不在$4k–$200k", base_tags, metrics
-    base_tags.append("市值$4k–$200k")
-    if txns_24h < QUALITY_MIN_TXNS_24H:
-        return False, f"24h交易数{txns_24h}<10", base_tags, metrics
-    base_tags.append("24h交易数≥10")
-    if volume_24h < QUALITY_MIN_VOLUME_24H_USD:
-        return False, f"24h交易量${volume_24h:.0f}<$50", base_tags, metrics
-    base_tags.append("24h交易量≥$50")
-    if top10 > TOP10_CONCENTRATION_MAX:
-        return False, f"Top10持仓{top10*100:.1f}%>60%", base_tags, metrics
 
     return True, "", base_tags, metrics
 
@@ -5398,7 +5359,8 @@ def scan_once(cfg: dict) -> dict:
                 elim_reason = f"流动性 ${t.get('peakLiquidity', 0):.0f}→${current_liq:.0f}"
         if not elim_reason and (t.get("socialCount", 0) or 0) < 1:
             elim_reason = "缺少社交媒体链接"
-        if not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
+        # 精筛价格上限不是存活队列淘汰条件；不满足精筛的代币仍需留在队列观察。
+        if False and not elim_reason and peak_price > QUALITY_PEAK_PRICE_MAX:
             elim_reason = (f"最高价{peak_price:.2e}>精筛上限"
                            f"{QUALITY_PEAK_PRICE_MAX:.2e}")
         # 持币数查不到/为0直接淘汰，其余按币龄逐级淘汰

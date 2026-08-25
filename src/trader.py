@@ -2987,6 +2987,28 @@ def check_sell_conditions(pos: dict, current_price: float,
     take_profit_multiple = float(trading_cfg.get("take_profit_multiple", 100))
     price_multiple = current_price / buy_price
 
+    # Hard stop-loss: this used to be present only in the legacy strategy,
+    # which meant the active strategy could keep a losing position forever.
+    stop_loss_pct = float(trading_cfg.get("stop_loss_pct", -25))
+    if stop_loss_pct < 0 and profit_pct <= stop_loss_pct:
+        return True, (
+            f"STOP_LOSS ({profit_pct:.1f}% <= {stop_loss_pct:.1f}%, "
+            f"持仓 {hold_days:.1f}天)"
+        ), False, 1.0
+
+    # Once a position has made a meaningful profit, protect it with a
+    # configurable trailing drawdown.  This is deliberately opt-in via
+    # tp_trigger_pct and keeps the old 100x emergency take-profit below.
+    tp_trigger_pct = float(trading_cfg.get("tp_trigger_pct", 0))
+    tp_drawdown_pct = float(trading_cfg.get("tp_drawdown_pct", 0))
+    if tp_trigger_pct > 0 and tp_drawdown_pct > 0 and max_profit_pct >= tp_trigger_pct:
+        drawdown_price = max_price * (1 - tp_drawdown_pct / 100)
+        if current_price <= drawdown_price:
+            return True, (
+                f"TRAILING_TP (最高盈利 {max_profit_pct:.1f}%, "
+                f"回撤 {tp_drawdown_pct:.1f}%, 当前盈利 {profit_pct:.1f}%)"
+            ), False, 1.0
+
     if hold_days >= max_hold_days:
         return True, (
             f"TIME_EXIT_{max_hold_days:g}D (持仓 {hold_days:.1f}天, "
