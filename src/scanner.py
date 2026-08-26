@@ -260,10 +260,11 @@ TOTAL_SUPPLY = 1_000_000_000
 # --- 当前精筛策略: 仅关注发币后最初 15 分钟的早期动能 ---
 # 精筛不通过只代表不推荐/不自动买入，绝不能作为队列淘汰依据。
 QUALITY_MIN_AGE_HOURS = 0.0
-QUALITY_MAX_AGE_HOURS = 0.25
+QUALITY_MAX_AGE_HOURS = 1.0
 QUALITY_MIN_HOLDERS = 10
 QUALITY_MAX_HOLDERS = 50
 QUALITY_MIN_PROGRESS = 0.12
+QUALITY_MAX_PROGRESS = 0.85
 
 # --- 旧标签制精筛参数: 保留给历史 helper/回滚对照 ---
 QUALITY_MIN_PRICE = 0.000003
@@ -4268,12 +4269,19 @@ def _check_quality_base_tags(t: dict, now_ms: int) -> tuple[bool, str, list[str]
     if age_hours < QUALITY_MIN_AGE_HOURS:
         return False, f"币龄{age_hours:.2f}h<0h", base_tags, metrics
     if age_hours > QUALITY_MAX_AGE_HOURS:
-        return False, f"币龄{age_hours * 60:.0f}分钟>15分钟", base_tags, metrics
-    base_tags.append("发币后15分钟内")
+        return False, f"币龄{age_hours * 60:.0f}分钟>60分钟", base_tags, metrics
+    base_tags.append("发币后1小时内")
 
-    if progress < QUALITY_MIN_PROGRESS:
-        return False, f"进度{progress * 100:.1f}%<12%", base_tags, metrics
-    base_tags.append("进度≥12%")
+    # The 15-minute checkpoint must be in the target range.  History is
+    # sampled once per scan (normally every 15 minutes), so index 1 is the
+    # first checkpoint after launch when available.
+    progress_hist = [float(x) for x in (t.get("progressHistory") or []) if _quality_float(x) >= 0]
+    checkpoint = progress_hist[1] if len(progress_hist) >= 2 else (progress if age_hours <= 0.25 else -1)
+    if checkpoint < QUALITY_MIN_PROGRESS or checkpoint > QUALITY_MAX_PROGRESS:
+        return False, f"15分钟进度{checkpoint * 100:.1f}%不在12%–85%", base_tags, metrics
+    if len(progress_hist) >= 2 and any(b <= a for a, b in zip(progress_hist, progress_hist[1:])):
+        return False, "进度未逐次递增", base_tags, metrics
+    base_tags.append("15分钟进度12%–85%且逐次递增")
 
     if holders < QUALITY_MIN_HOLDERS:
         return False, f"持币地址{holders}<{QUALITY_MIN_HOLDERS}", base_tags, metrics
